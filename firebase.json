@@ -1,0 +1,56 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "alexis-tailor-system-2025",
+          "appId": "1:228950803014:android:bf64046b7b2a1e091f4047",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "ios": {
+        "default": {
+          "projectId": "alexis-tailor-system-2025",
+          "appId": "1:228950803014:ios:8a0bb3e98ae07bbd1f4047",
+          "uploadDebugSymbols": false,
+          "fileOutput": "ios/Runner/GoogleService-Info.plist"
+        }
+      },
+      "macos": {
+        "default": {
+          "projectId": "alexis-tailor-system-2025",
+          "appId": "1:228950803014:ios:8a0bb3e98ae07bbd1f4047",
+          "uploadDebugSymbols": false,
+          "fileOutput": "macos/Runner/GoogleService-Info.plist"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "alexis-tailor-system-2025",
+          "configurations": {
+            "android": "1:228950803014:android:bf64046b7b2a1e091f4047",
+            "ios": "1:228950803014:ios:8a0bb3e98ae07bbd1f4047",
+            "macos": "1:228950803014:ios:8a0bb3e98ae07bbd1f4047",
+            "web": "1:228950803014:web:db7995355b76c6d41f4047",
+            "windows": "1:228950803014:web:e6f33c1ae41fa15e1f4047"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "target": "main",
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

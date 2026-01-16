@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "228950803014",
+    "firebase_url": "https://alexis-tailor-system-2025-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "alexis-tailor-system-2025",
+    "storage_bucket": "alexis-tailor-system-2025.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:228950803014:android:4987930816b730141f4047",
+        "android_client_info": {
+          "package_name": "com.alexis.tailor_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDaLiWk2GXsoa7SC5oLAvM_af8_s7QecMk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:228950803014:android:bf64046b7b2a1e091f4047",
+        "android_client_info": {
+          "package_name": "com.example.alexis_system"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDaLiWk2GXsoa7SC5oLAvM_af8_s7QecMk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
