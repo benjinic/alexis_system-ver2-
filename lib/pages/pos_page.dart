@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../models/order.dart';
 import '../models/workshop_order.dart';
 import '../models/workshop_status.dart';
@@ -10,10 +11,10 @@ import '../models/material_item.dart';
 import '../models/service_item.dart';
 import '../services/database_service.dart';
 import '../services/pdf_service.dart';
+import '../providers/cart_provider.dart';
 
 class POSPage extends StatefulWidget {
   final Order? orderForEdit;
-
   const POSPage({super.key, this.orderForEdit});
 
   @override
@@ -23,23 +24,17 @@ class POSPage extends StatefulWidget {
 class _POSPageState extends State<POSPage> {
   final DatabaseService _dbService = DatabaseService();
 
-  List<OrderItem> _items = [];
   final TextEditingController _customerNameController = TextEditingController();
   final TextEditingController _discountController = TextEditingController();
   final TextEditingController _depositController = TextEditingController();
-  final TextEditingController _balancePaymentController =
-      TextEditingController();
-
-  bool _isLoading = false;
-  String _selectedPaymentMethod = 'Cash';
-  String _selectedBalancePaymentMethod = 'Cash';
+  final TextEditingController _balancePaymentController = TextEditingController();
 
   String? _selectedCustomerId;
   Customer? _selectedCustomer;
 
-  late Stream<DateTime> _timeStream;
-  late Stream<List<Customer>> _customersStream;
-  Stream<int>? _nextOrderIdStream;
+  bool _isLoading = false;
+  String _selectedPaymentMethod = 'Cash';
+  String _selectedBalancePaymentMethod = 'Cash';
 
   final List<String> _paymentMethods = [
     'Cash',
@@ -50,39 +45,53 @@ class _POSPageState extends State<POSPage> {
     'Other',
   ];
 
+  late Stream<DateTime> _timeStream;
+  late Stream<List<Customer>> _customersStream;
+  Stream<int>? _nextOrderIdStream;
+
   @override
   void initState() {
     super.initState();
-    _timeStream = Stream.periodic(
-      const Duration(seconds: 1),
-      (_) => DateTime.now(),
-    ).asBroadcastStream();
+    _timeStream = Stream.periodic(const Duration(seconds: 1), (_) => DateTime.now())
+        .asBroadcastStream();
     _customersStream = _dbService.getCustomersStream();
-
-    // Ensure there are default service data (prevent empty on first open)
     _dbService.seedDefaultServices();
 
-    if (widget.orderForEdit != null) {
-      _loadExistingOrder(widget.orderForEdit!);
-    } else {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final cart = context.read<CartProvider>();
+      cart.clearCart();
+
+      if (widget.orderForEdit != null) {
+        _loadExistingOrder(widget.orderForEdit!);
+      }
+    });
+
+    if (widget.orderForEdit == null) {
       _nextOrderIdStream = _dbService.getNextOrderIdStream();
     }
   }
 
+  @override
+  void dispose() {
+    _customerNameController.dispose();
+    _discountController.dispose();
+    _depositController.dispose();
+    _balancePaymentController.dispose();
+    super.dispose();
+  }
+
   void _loadExistingOrder(Order order) {
     setState(() {
-      _items = List.from(order.items);
-      _selectedCustomerId = order.customerId.isNotEmpty
-          ? order.customerId
-          : null;
+      context.read<CartProvider>().loadOrderItems(order.items);
+
+      _selectedCustomerId =
+          order.customerId.isNotEmpty ? order.customerId : null;
       _customerNameController.text = order.customerName;
 
-      _discountController.text = order.discount == 0
-          ? ''
-          : order.discount.toStringAsFixed(0);
-      _depositController.text = order.deposit == 0
-          ? ''
-          : order.deposit.toStringAsFixed(0);
+      _discountController.text =
+          order.discount == 0 ? '' : order.discount.toStringAsFixed(0);
+      _depositController.text =
+          order.deposit == 0 ? '' : order.deposit.toStringAsFixed(0);
 
       _balancePaymentController.text = order.balancePayment == 0
           ? ''
@@ -100,97 +109,66 @@ class _POSPageState extends State<POSPage> {
     });
   }
 
-  @override
-  void dispose() {
-    _customerNameController.dispose();
-    _discountController.dispose();
-    _depositController.dispose();
-    _balancePaymentController.dispose();
-    super.dispose();
-  }
-
-  // === 核心功能：可搜尋的客戶選擇視窗 ===
   void _showCustomerSelectSheet(BuildContext context) {
     showDialog(
-      // 改用 showDialog
       context: context,
       builder: (context) {
         String searchQuery = '';
-
         return Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: 500,
-              maxHeight: 600,
-            ), // 限制大小
+            constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
             child: StatefulBuilder(
-              // 需要 StatefulBuilder 來更新搜尋結果
               builder: (BuildContext context, StateSetter setModalState) {
                 return Padding(
                   padding: const EdgeInsets.all(24.0),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Header
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
-                            'Select Customer',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                          const Text('Select Customer',
+                              style: TextStyle(
+                                  fontSize: 20, fontWeight: FontWeight.bold)),
                           IconButton(
-                            onPressed: () => Navigator.pop(context),
-                            icon: const Icon(Icons.close),
-                          ),
+                              onPressed: () => Navigator.pop(context),
+                              icon: const Icon(Icons.close)),
                         ],
                       ),
                       const SizedBox(height: 16),
-
-                      // 搜尋框
                       TextField(
                         decoration: InputDecoration(
                           hintText: 'Search name or phone...',
                           prefixIcon: const Icon(Icons.search),
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                              borderRadius: BorderRadius.circular(12)),
                           filled: true,
                           fillColor: Colors.grey[100],
                         ),
-                        onChanged: (val) => setModalState(
-                          () => searchQuery = val.toLowerCase(),
-                        ),
+                        onChanged: (val) =>
+                            setModalState(() => searchQuery = val.toLowerCase()),
                       ),
                       const SizedBox(height: 16),
-
-                      // 客戶列表
                       Expanded(
                         child: StreamBuilder<List<Customer>>(
                           stream: _customersStream,
                           builder: (context, snapshot) {
-                            if (snapshot.hasError)
+                            if (snapshot.hasError) {
                               return Center(
-                                child: Text('Error: ${snapshot.error}'),
-                              );
+                                  child: Text('Error: ${snapshot.error}'));
+                            }
                             if (snapshot.connectionState ==
                                 ConnectionState.waiting) {
                               return const Center(
-                                child: CircularProgressIndicator(),
-                              );
+                                  child: CircularProgressIndicator());
                             }
 
                             final allCustomers = snapshot.data ?? [];
                             final filteredCustomers = allCustomers.where((c) {
-                              return c.name.toLowerCase().contains(
-                                    searchQuery,
-                                  ) ||
+                              return c.name
+                                      .toLowerCase()
+                                      .contains(searchQuery) ||
                                   c.phone.contains(searchQuery);
                             }).toList();
 
@@ -199,29 +177,23 @@ class _POSPageState extends State<POSPage> {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    const Icon(
-                                      Icons.person_off,
-                                      size: 48,
-                                      color: Colors.grey,
-                                    ),
+                                    const Icon(Icons.person_off,
+                                        size: 48, color: Colors.grey),
                                     const SizedBox(height: 12),
                                     Text(
-                                      'No customer found for "$searchQuery"',
-                                      style: const TextStyle(
-                                        color: Colors.grey,
-                                      ),
-                                    ),
+                                        'No customer found for "$searchQuery"',
+                                        style: const TextStyle(
+                                            color: Colors.grey)),
                                     const SizedBox(height: 12),
                                     ElevatedButton.icon(
                                       onPressed: () {
-                                        Navigator.pop(context); // 關閉選擇視窗
-                                        _showAddCustomerDialog(
-                                          context,
-                                          initialName: searchQuery,
-                                        ); // 開啟新增視窗
+                                        Navigator.pop(context);
+                                        _showAddCustomerDialog(context,
+                                            initialName: searchQuery);
                                       },
                                       icon: const Icon(Icons.person_add),
-                                      label: const Text('Add New Customer'),
+                                      label:
+                                          const Text('Add New Customer'),
                                     ),
                                   ],
                                 ),
@@ -246,28 +218,21 @@ class _POSPageState extends State<POSPage> {
                                           ? customer.name[0].toUpperCase()
                                           : '?',
                                       style: TextStyle(
-                                        color: isSelected
-                                            ? Colors.white
-                                            : Colors.black,
-                                      ),
+                                          color: isSelected
+                                              ? Colors.white
+                                              : Colors.black),
                                     ),
                                   ),
-                                  title: Text(
-                                    customer.name,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    customer.phone.isNotEmpty
-                                        ? customer.phone
-                                        : 'No phone',
-                                  ),
+                                  title: Text(customer.name,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold)),
+                                  subtitle: Text(customer.phone.isNotEmpty
+                                      ? customer.phone
+                                      : 'No phone'),
                                   trailing: isSelected
-                                      ? Icon(
-                                          Icons.check_circle,
-                                          color: Theme.of(context).primaryColor,
-                                        )
+                                      ? Icon(Icons.check_circle,
+                                          color: Theme.of(context)
+                                              .primaryColor)
                                       : null,
                                   onTap: () {
                                     setState(() {
@@ -296,9 +261,9 @@ class _POSPageState extends State<POSPage> {
   }
 
   void _showAddCustomerDialog(BuildContext context, {String? initialName}) {
-    final nameCtrl = TextEditingController(text: initialName);
-    final phoneCtrl = TextEditingController();
-    final emailCtrl = TextEditingController();
+    final nameController = TextEditingController(text: initialName ?? '');
+    final phoneController = TextEditingController();
+    final emailController = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
     showDialog(
@@ -307,36 +272,63 @@ class _POSPageState extends State<POSPage> {
         title: const Text('Add New Customer'),
         content: Form(
           key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Name',
-                  prefixIcon: Icon(Icons.person),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: nameController,
+                  decoration: InputDecoration(
+                    labelText: 'Name *',
+                    hintText: 'Customer name',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    filled: true,
+                    fillColor: Colors.grey[50],
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Name is required';
+                    }
+                    return null;
+                  },
                 ),
-                validator: (v) => v!.isEmpty ? 'Name is required' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: phoneCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Phone',
-                  prefixIcon: Icon(Icons.phone),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: phoneController,
+                  decoration: InputDecoration(
+                    labelText: 'Phone',
+                    hintText: 'Customer phone',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    filled: true,
+                    fillColor: Colors.grey[50],
+                  ),
+                  keyboardType: TextInputType.phone,
                 ),
-                keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: emailCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Email',
-                  prefixIcon: Icon(Icons.email),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: emailController,
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    hintText: 'customer@example.com',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    filled: true,
+                    fillColor: Colors.grey[50],
+                  ),
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (value) {
+                    if (value != null && value.isNotEmpty) {
+                      if (!RegExp(r'^[^@]+@[^@]+\.[^@]+$').hasMatch(value)) {
+                        return 'Enter a valid email';
+                      }
+                    }
+                    return null;
+                  },
                 ),
-                keyboardType: TextInputType.emailAddress,
-              ),
-            ],
+              ],
+            ),
           ),
         ),
         actions: [
@@ -350,84 +342,75 @@ class _POSPageState extends State<POSPage> {
                 try {
                   final newCustomer = Customer(
                     id: '',
-                    name: nameCtrl.text.trim(),
-                    phone: phoneCtrl.text.trim(),
-                    email: emailCtrl.text.trim(),
+                    name: nameController.text.trim(),
+                    phone: phoneController.text.trim(),
+                    email: emailController.text.trim(),
                     orders: 0,
                     totalSpent: 0,
                   );
-                  String newId = await _dbService.addCustomer(newCustomer);
-
+                  final id = await _dbService.addCustomer(newCustomer);
                   if (mounted) {
-                    Navigator.pop(ctx);
                     setState(() {
-                      _selectedCustomerId = newId;
-                      _customerNameController.text = newCustomer.name;
+                      _selectedCustomerId = id;
+                      _customerNameController.text = nameController.text.trim();
                     });
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Customer added: ${newCustomer.name}'),
-                        backgroundColor: Colors.green,
+                      const SnackBar(
+                        content: Text('Customer added successfully'),
+                        duration: Duration(seconds: 2),
                       ),
                     );
+                    Navigator.pop(ctx);
                   }
                 } catch (e) {
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error: $e')),
+                    );
+                  }
                 }
               }
             },
-            child: const Text('Add'),
+            child: const Text('Add Customer'),
           ),
         ],
       ),
     );
   }
 
-  // === 優化：通用項目對話框 (支援新增與修改) ===
   void _showItemDialog({OrderItem? existingItem, int? index}) async {
-    // 1. 讀取服務與庫存資料
-    final services = await _dbService.getServicesStream().first;
+    // 1. 讀取庫存 (Fabric)
     final fabrics = await _dbService.getInventory();
 
     if (!mounted) return;
 
-    // 2. 初始化控制器 (若為編輯模式，填入現有數值)
-    final priceController = TextEditingController(
-      text: existingItem?.price.toStringAsFixed(0) ?? '',
-    );
-    final usageController = TextEditingController(
-      text: existingItem?.fabricUsed.toString() ?? '0',
-    );
-    final quantityController = TextEditingController(
-      text: existingItem?.quantity.toString() ?? '1',
-    );
+    // 初始化數值控制器
+    final priceController = TextEditingController(text: existingItem?.price.toStringAsFixed(0) ?? '');
+    final usageController = TextEditingController(text: existingItem?.fabricUsed.toString() ?? '0');
+    final quantityController = TextEditingController(text: existingItem?.quantity.toString() ?? '1');
     final suggestedPriceController = TextEditingController();
+    
+    // 2. 初始化搜尋控制器 (新增 fabricSearchController)
+    final searchController = TextEditingController();       // 服務搜尋
+    final fabricSearchController = TextEditingController(); // 布料搜尋 <--- 新增此行
 
-    // 3. 設定初始選取狀態
     ServiceItem? selectedService;
     MaterialItem? selectedFabric;
 
+    // 若為編輯模式，還原已選資料
     if (existingItem != null) {
-      // 嘗試還原已選的服務
-      try {
-        selectedService = services.firstWhere(
-          (s) => s.name == existingItem.service,
-        );
-      } catch (_) {}
-
-      // 嘗試還原已選的布料
+      // 還原服務
+      // (注意：服務的 selectedService 還原會由 StreamBuilder 內的邏輯處理)
+      
+      // 還原布料
       if (existingItem.fabricId != null) {
         try {
-          selectedFabric = fabrics.firstWhere(
-            (f) => f.id == existingItem.fabricId,
-          );
+          selectedFabric = fabrics.firstWhere((f) => f.id == existingItem.fabricId);
         } catch (_) {}
       }
     }
 
-    // 4. 定義計算邏輯 (用於即時更新建議價格)
+    // 計算價格邏輯
     void calculateValues() {
       if (selectedService != null) {
         double servicePrice = selectedService!.price;
@@ -439,17 +422,14 @@ class _POSPageState extends State<POSPage> {
 
         suggestedPriceController.text = suggestedPrice.toStringAsFixed(0);
 
-        // 僅在價格欄位為空 (新增模式) 時才自動填入，避免覆蓋使用者輸入
+        // 如果是新增模式且價格為空，才自動填入
         if (priceController.text.isEmpty) {
           priceController.text = suggestedPrice.toStringAsFixed(0);
         }
       }
     }
 
-    // 若為編輯模式，先執行一次計算以顯示建議價格參考
-    if (existingItem != null) {
-      calculateValues();
-    }
+    if (existingItem != null) calculateValues();
 
     await showDialog(
       context: context,
@@ -462,6 +442,13 @@ class _POSPageState extends State<POSPage> {
             estimatedMaterialCost = currentUsage * selectedFabric!.costPerUnit;
           }
 
+          // 3. 布料篩選邏輯 (根據輸入過濾列表)
+          final fabricSearchQuery = fabricSearchController.text.toLowerCase();
+          final filteredFabrics = fabrics.where((f) {
+            return f.name.toLowerCase().contains(fabricSearchQuery) || 
+                   f.id.toLowerCase().contains(fabricSearchQuery);
+          }).toList();
+
           return AlertDialog(
             title: Text(existingItem != null ? 'Edit Item' : 'Add Item'),
             content: SingleChildScrollView(
@@ -469,93 +456,179 @@ class _POSPageState extends State<POSPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // --- 服務選擇 ---
-                  if (services.isEmpty)
-                    const Text('No services defined.')
-                  else
-                    Wrap(
-                      spacing: 8.0,
-                      runSpacing: 8.0,
-                      children: services.map((service) {
-                        final isSelected = selectedService?.id == service.id;
-                        return ChoiceChip(
-                          label: Text('${service.name}'),
-                          selected: isSelected,
-                          onSelected: (selected) {
-                            setDialogState(() {
-                              selectedService = selected ? service : null;
-                              if (selected) {
-                                // 若切換服務且用量為0，帶入預設用量
-                                if (usageController.text == '0') {
-                                  usageController.text = service
-                                      .defaultFabricUsage
-                                      .toString();
-                                }
-                                // 若無預設用量，清空布料選取
-                                if (service.defaultFabricUsage == 0) {
-                                  selectedFabric = null;
-                                }
-                                // 若為新增模式，重置價格
-                                if (existingItem == null)
-                                  priceController.clear();
-                                calculateValues();
-                              }
-                            });
-                          },
-                        );
-                      }).toList(),
+                  // === 區塊 1: 服務搜尋與選擇 ===
+                  TextField(
+                    controller: searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search services...',
+                      prefixIcon: const Icon(Icons.search),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      filled: true,
+                      fillColor: Theme.of(context).brightness == Brightness.dark 
+                          ? Colors.grey[800] 
+                          : Colors.grey[100],
                     ),
-                  const SizedBox(height: 16),
+                    onChanged: (value) => setDialogState(() {}),
+                  ),
+                  const SizedBox(height: 12),
 
-                  // --- 布料選擇 ---
-                  if (selectedService != null &&
-                      (selectedService!.defaultFabricUsage > 0 ||
-                          (existingItem?.fabricUsed ?? 0) > 0)) ...[
-                    DropdownButtonFormField<MaterialItem>(
-                      decoration: const InputDecoration(
-                        labelText: 'Select Fabric',
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
+                  StreamBuilder<List<ServiceItem>>(
+                    stream: _dbService.getServicesStream(),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) return Text('Error: ${snapshot.error}');
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 16.0),
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+
+                      final allServices = snapshot.data ?? [];
+                      final searchQuery = searchController.text.toLowerCase();
+                      final filteredServices = allServices.where((s) {
+                        return s.name.toLowerCase().contains(searchQuery);
+                      }).toList();
+
+                      // 自動對應編輯中的項目 (僅在 selectedService 為空時執行)
+                      if (existingItem != null && selectedService == null && allServices.isNotEmpty) {
+                         try {
+                           final foundService = allServices.firstWhere((s) => s.name == existingItem.service);
+                           selectedService = foundService;
+                         } catch (_) {}
+                      }
+
+                      if (allServices.isEmpty) return const Text('No services defined.');
+                      if (filteredServices.isEmpty) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Text('No results for "$searchQuery"', style: const TextStyle(color: Colors.grey)),
+                        );
+                      }
+
+                      return ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 200), 
+                        child: SingleChildScrollView(
+                          child: Wrap(
+                            spacing: 8.0,
+                            runSpacing: 8.0,
+                            children: filteredServices.map((service) {
+                              final isSelected = selectedService?.id == service.id;
+                              return ChoiceChip(
+                                label: Text('${service.name}'),
+                                selected: isSelected,
+                                onSelected: (selected) {
+                                  setDialogState(() {
+                                    selectedService = selected ? service : null;
+                                    if (selected) {
+                                      if (usageController.text == '0') {
+                                        usageController.text = service.defaultFabricUsage.toString();
+                                      }
+                                      if (service.defaultFabricUsage == 0) selectedFabric = null;
+                                      if (existingItem == null) priceController.clear();
+                                      calculateValues();
+                                    }
+                                  });
+                                },
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  const SizedBox(height: 16),
+                  
+                  // === 區塊 2: 布料搜尋與選擇 (已移除 Dropdown，改為搜尋+列表) ===
+                  if (selectedService != null && (selectedService!.defaultFabricUsage > 0 || (existingItem?.fabricUsed ?? 0) > 0)) ...[
+                    const Text('Select Fabric', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    
+                    // 4. 布料搜尋框
+                    TextField(
+                      controller: fabricSearchController,
+                      decoration: InputDecoration(
+                        hintText: 'Search fabric name or ID...',
+                        prefixIcon: const Icon(Icons.search),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        filled: true,
+                        fillColor: Theme.of(context).brightness == Brightness.dark 
+                            ? Colors.grey[800] 
+                            : Colors.grey[100],
+                      ),
+                      onChanged: (value) => setDialogState(() {}),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // 5. 布料結果列表
+                    if (filteredFabrics.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(8.0),
+                        child: Text('No fabric found', style: TextStyle(color: Colors.grey)),
+                      )
+                    else
+                      Container(
+                        height: 150, // 固定高度讓列表可捲動
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: ListView.separated(
+                          padding: EdgeInsets.zero,
+                          itemCount: filteredFabrics.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final fabric = filteredFabrics[index];
+                            final isSelected = selectedFabric?.id == fabric.id;
+                            
+                            return ListTile(
+                              dense: true,
+                              selected: isSelected,
+                              selectedTileColor: Theme.of(context).primaryColor.withValues(alpha: 0.1),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                              leading: Container(
+                                width: 30, height: 30,
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[300],
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: (fabric.imageUrl?.isNotEmpty ?? false)
+                                    ? Image.network(fabric.imageUrl!, fit: BoxFit.cover)
+                                    : const Icon(Icons.texture, size: 16),
+                              ),
+                              title: Text(fabric.name, overflow: TextOverflow.ellipsis),
+                              subtitle: Text('\$${fabric.costPerUnit.toStringAsFixed(0)} / ${fabric.unit}'),
+                              trailing: isSelected ? Icon(Icons.check_circle, size: 18, color: Theme.of(context).primaryColor) : null,
+                              onTap: () {
+                                setDialogState(() {
+                                  selectedFabric = fabric;
+                                  calculateValues();
+                                });
+                              },
+                            );
+                          },
                         ),
                       ),
-                      isExpanded: true,
-                      itemHeight: 60,
-                      value: selectedFabric,
-                      items: fabrics
-                          .map(
-                            (f) => DropdownMenuItem(
-                              value: f,
-                              child: Text(
-                                '${f.name} (\$${f.costPerUnit.toStringAsFixed(0)})',
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) => setDialogState(() {
-                        selectedFabric = value;
-                        calculateValues();
-                      }),
-                    ),
+                    
                     const SizedBox(height: 16),
+                    
                     // 布料用量
                     Row(
                       children: [
                         Expanded(
                           child: TextFormField(
                             controller: usageController,
-                            decoration: const InputDecoration(
-                              labelText: 'Usage (m)',
-                              border: OutlineInputBorder(),
-                            ),
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
+                            decoration: const InputDecoration(labelText: 'Usage (m)', border: OutlineInputBorder()),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             onChanged: (_) {
-                              setDialogState(() {}); // 更新預估成本
+                              setDialogState(() {});
                               calculateValues();
                             },
                           ),
@@ -564,20 +637,8 @@ class _POSPageState extends State<POSPage> {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Est. Cost',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            Text(
-                              '\$${estimatedMaterialCost.toStringAsFixed(0)}',
-                              style: const TextStyle(
-                                color: Colors.red,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            const Text('Est. Cost', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                            Text('\$${estimatedMaterialCost.toStringAsFixed(0)}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                           ],
                         ),
                       ],
@@ -585,18 +646,14 @@ class _POSPageState extends State<POSPage> {
                     const SizedBox(height: 24),
                   ],
 
-                  // --- 價格與數量 ---
+                  // === 區塊 3: 價格與數量 ===
                   Row(
                     children: [
                       Expanded(
                         flex: 2,
                         child: TextFormField(
                           controller: priceController,
-                          decoration: const InputDecoration(
-                            labelText: 'Unit Price',
-                            prefixIcon: Icon(Icons.attach_money),
-                            border: OutlineInputBorder(),
-                          ),
+                          decoration: const InputDecoration(labelText: 'Unit Price', prefixIcon: Icon(Icons.attach_money), border: OutlineInputBorder()),
                           keyboardType: TextInputType.number,
                         ),
                       ),
@@ -605,15 +662,9 @@ class _POSPageState extends State<POSPage> {
                         flex: 1,
                         child: TextFormField(
                           controller: quantityController,
-                          decoration: const InputDecoration(
-                            labelText: 'Qty',
-                            prefixIcon: Icon(Icons.numbers),
-                            border: OutlineInputBorder(),
-                          ),
+                          decoration: const InputDecoration(labelText: 'Qty', prefixIcon: Icon(Icons.numbers), border: OutlineInputBorder()),
                           keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                          ],
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                         ),
                       ),
                     ],
@@ -622,28 +673,17 @@ class _POSPageState extends State<POSPage> {
               ),
             ),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
               ElevatedButton(
                 onPressed: (selectedService == null)
                     ? null
                     : () {
-                        // 儲存邏輯
-                        final double finalPrice =
-                            double.tryParse(priceController.text) ??
-                            selectedService!.price;
-                        final double finalUsage =
-                            double.tryParse(usageController.text) ?? 0.0;
-                        final int finalQty =
-                            int.tryParse(quantityController.text) ?? 1;
+                        final double finalPrice = double.tryParse(priceController.text) ?? selectedService!.price;
+                        final double finalUsage = double.tryParse(usageController.text) ?? 0.0;
+                        final int finalQty = int.tryParse(quantityController.text) ?? 1;
 
                         final newItem = OrderItem(
-                          id:
-                              existingItem?.id ??
-                              DateTime.now().millisecondsSinceEpoch
-                                  .toString(), // 保留舊ID或生成新ID
+                          id: existingItem?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
                           service: selectedService!.name,
                           price: finalPrice,
                           quantity: finalQty,
@@ -653,15 +693,13 @@ class _POSPageState extends State<POSPage> {
                           cost: estimatedMaterialCost,
                         );
 
-                        setState(() {
-                          if (existingItem != null && index != null) {
-                            // 修改模式：更新清單
-                            _items[index] = newItem;
-                          } else {
-                            // 新增模式：加入清單
-                            _items.add(newItem);
-                          }
-                        });
+                        // 使用 Provider 新增或更新
+                        if (existingItem != null && index != null) {
+                          context.read<CartProvider>().updateItem(index, newItem);
+                        } else {
+                          context.read<CartProvider>().addItem(newItem);
+                        }
+                        
                         Navigator.pop(context);
                       },
                 child: Text(existingItem != null ? 'Save' : 'Add'),
@@ -673,11 +711,12 @@ class _POSPageState extends State<POSPage> {
     );
   }
 
-  // === Order Processing with Receipt and Job Ticket Printing ===
+  // === Updated _processOrder to use Provider ===
   Future<void> _processOrder() async {
+    final cart = context.read<CartProvider>();
     String finalCustomerName = _customerNameController.text.trim();
 
-    if (_items.isEmpty ||
+    if (cart.items.isEmpty ||
         (_selectedCustomerId == null && finalCustomerName.isEmpty)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -691,14 +730,8 @@ class _POSPageState extends State<POSPage> {
     setState(() => _isLoading = true);
 
     try {
-      double subtotal = _items.fold(
-        0,
-        (sum, item) => sum + (item.price * item.quantity),
-      );
-      double totalCost = _items.fold(
-        0,
-        (sum, item) => sum + (item.cost * item.quantity),
-      );
+      double subtotal = cart.subtotal;
+      double totalCost = cart.totalCost;
       double discount = double.tryParse(_discountController.text) ?? 0.0;
       double total = (subtotal - discount).clamp(0, double.infinity);
 
@@ -744,7 +777,7 @@ class _POSPageState extends State<POSPage> {
             : DateTime.now().millisecondsSinceEpoch.toString(),
         customerId: customerId,
         customerName: finalCustomerName,
-        items: _items,
+        items: cart.items,
         subtotal: subtotal,
         discount: discount,
         total: total,
@@ -779,7 +812,7 @@ class _POSPageState extends State<POSPage> {
         // Fetch all service settings to enable duration lookup
         final allServices = await _dbService.getServicesStream().first;
 
-        for (var item in _items) {
+        for (var item in cart.items) {
           if (item.fabricUsed > 0 || item.service == 'Alterations') {
             // Look up service duration from settings
             int productionDays = 7; // Default fallback
@@ -911,8 +944,10 @@ class _POSPageState extends State<POSPage> {
         if (isEditMode) {
           Navigator.pop(context);
         } else {
+          // Clear cart via Provider
+          cart.clearCart();
+
           setState(() {
-            _items.clear();
             _customerNameController.clear();
             _discountController.clear();
             _depositController.clear();
@@ -1022,176 +1057,185 @@ class _POSPageState extends State<POSPage> {
     );
   }
 
-  // 為了適應新佈局，微調 Card 的邊距設定 (移除原本寫死的 margin)
   Widget _buildCartCard() {
     return Card(
-      // margin: const EdgeInsets.all(16), // 移除這行，改由外部 Padding 控制
       child: Padding(
         padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min, // 讓高度自適應內容
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: Consumer<CartProvider>(
+          builder: (context, cart, child) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                  'Cart Items',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                StreamBuilder<DateTime>(
-                  stream: _timeStream,
-                  builder: (context, snapshot) {
-                    final time = snapshot.data ?? DateTime.now();
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          DateFormat('yyyy-MM-dd').format(time),
-                          style: TextStyle(color: Colors.grey[600]),
-                        ),
-                        Text(
-                          DateFormat('HH:mm:ss').format(time),
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ],
-            ),
-            const Divider(),
-            const SizedBox(height: 16),
-
-            if (_items.isEmpty)
-              Container(
-                height: 300, // 給空狀態一個固定高度
-                alignment: Alignment.center,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Icon(
-                      Icons.shopping_cart_outlined,
-                      size: 64,
-                      color: Colors.grey[300],
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Cart is empty',
-                      style: TextStyle(color: Colors.grey[500], fontSize: 18),
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      onPressed: () => _showItemDialog(),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add First Item'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 32,
-                          vertical: 16,
-                        ),
+                    const Text(
+                      'Cart Items',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ],
-                ),
-              )
-            else ...[
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _items.length,
-                separatorBuilder: (_, __) => const Divider(),
-                itemBuilder: (context, index) {
-                  final item = _items[index];
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Row(
-                      children: [
-                        Text(
-                          item.service,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        if (item.quantity > 1) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
+                    StreamBuilder<DateTime>(
+                      stream: _timeStream,
+                      builder: (context, snapshot) {
+                        final time = snapshot.data ?? DateTime.now();
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              DateFormat('yyyy-MM-dd').format(time),
+                              style: TextStyle(color: Colors.grey[600]),
                             ),
-                            decoration: BoxDecoration(
-                              color: Colors.blue[50],
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              'x${item.quantity}',
+                            Text(
+                              DateFormat('HH:mm:ss').format(time),
                               style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.blue,
+                                fontSize: 18,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                          ),
-                        ],
-                      ],
+                          ],
+                        );
+                      },
                     ),
-                    subtitle: item.fabricName != null
-                        ? Text(
-                            '${item.fabricName} (${item.fabricUsed}m)\nCost: \$${item.cost.toStringAsFixed(1)}',
-                          )
-                        : const Text('No fabric required'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '\$${(item.price * item.quantity).toStringAsFixed(0)}', // 顯示總價 (單價x數量)
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        // 編輯按鈕
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue),
-                          tooltip: 'Edit Item',
-                          onPressed: () =>
-                              _showItemDialog(existingItem: item, index: index),
-                        ),
-                        // 刪除按鈕
-                        IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () =>
-                              setState(() => _items.removeAt(index)),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _showItemDialog(), // 呼叫新方法 (無參數=新增)
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add Item'),
+                  ],
                 ),
-              ),
-            ],
-          ],
+                const Divider(),
+                const SizedBox(height: 16),
+
+                if (cart.items.isEmpty)
+                  Container(
+                    height: 300, // 給空狀態一個固定高度
+                    alignment: Alignment.center,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.shopping_cart_outlined,
+                          size: 64,
+                          color: Colors.grey[300],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Cart is empty',
+                          style: TextStyle(
+                            color: Colors.grey[500],
+                            fontSize: 18,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton.icon(
+                          onPressed: () => _showItemDialog(),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add First Item'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 32,
+                              vertical: 16,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else ...[
+                  ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: cart.items.length,
+                    separatorBuilder: (_, __) => const Divider(),
+                    itemBuilder: (context, index) {
+                      final item = cart.items[index];
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Row(
+                          children: [
+                            Text(
+                              item.service,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            if (item.quantity > 1) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue[50],
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'x${item.quantity}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.blue,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        subtitle: item.fabricName != null
+                            ? Text(
+                                '${item.fabricName} (${item.fabricUsed}m)\nCost: \$${item.cost.toStringAsFixed(1)}',
+                              )
+                            : const Text('No fabric required'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '\$${(item.price * item.quantity).toStringAsFixed(0)}', // 顯示總價 (單價x數量)
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // 編輯按鈕
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.blue),
+                              tooltip: 'Edit Item',
+                              onPressed: () => _showItemDialog(
+                                existingItem: item,
+                                index: index,
+                              ),
+                            ),
+                            // Delete via Provider
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () => cart.removeItem(index),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showItemDialog(),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Item'),
+                    ),
+                  ),
+                ],
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
-  // 微調 Summary Card
   Widget _buildSummaryCard() {
-    double subtotal = _items.fold(
-      0,
-      (sum, item) => sum + (item.price * item.quantity),
-    );
+    final cart = context.watch<CartProvider>();
+
+    double subtotal = cart.subtotal;
     double discount = double.tryParse(_discountController.text) ?? 0.0;
     double total = (subtotal - discount).clamp(0, double.infinity);
 
@@ -1238,7 +1282,7 @@ class _POSPageState extends State<POSPage> {
                 const SizedBox(width: 8),
                 Container(
                   decoration: BoxDecoration(
-                    color: Theme.of(context).primaryColor.withOpacity(0.1),
+                    color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: IconButton(
@@ -1409,7 +1453,7 @@ class _POSPageState extends State<POSPage> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _items.isEmpty ? null : _processOrder,
+                onPressed: cart.items.isEmpty ? null : _processOrder,
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 20),
                   backgroundColor: isEditMode

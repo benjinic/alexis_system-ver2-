@@ -1,9 +1,6 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import '../services/database_service.dart';
 import '../models/material_item.dart';
+import '../services/database_service.dart';
 
 class FabricPage extends StatefulWidget {
   const FabricPage({super.key});
@@ -12,215 +9,139 @@ class FabricPage extends StatefulWidget {
   State<FabricPage> createState() => _FabricPageState();
 }
 
-class _FabricPageState extends State<FabricPage> {
+class _FabricPageState extends State<FabricPage> with SingleTickerProviderStateMixin {
   final DatabaseService _dbService = DatabaseService();
-  bool _isUploading = false;
+  
+  // 定義分類清單
+  final List<String> _categories = ['All', 'Cotton', 'Linen', 'Wool', 'Other'];
+  
+  // 控制選中的 Tab
+  late TabController _tabController;
 
-  // 顯示 新增/編輯 布料的對話框
-  void _showFabricDialog(BuildContext context, {MaterialItem? item}) {
-    final formKey = GlobalKey<FormState>();
-    
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: _categories.length, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  // === 新增/編輯 對話框 ===
+  void _showAddEditDialog({MaterialItem? item}) {
     final nameController = TextEditingController(text: item?.name ?? '');
-    final categoryController = TextEditingController(text: item?.category ?? 'Fabric');
-    final unitController = TextEditingController(text: item?.unit ?? 'meters');
-    final costController = TextEditingController(text: item?.costPerUnit.toString() ?? '0');
-    final descController = TextEditingController(text: item?.description ?? '');
+    final costController = TextEditingController(text: item?.costPerUnit.toString() ?? '');
+    final stockController = TextEditingController(text: item?.stock.toString() ?? '');
+    final reorderController = TextEditingController(text: item?.reorderLevel.toString() ?? '10');
+    final unitController = TextEditingController(text: item?.unit ?? 'm');
+    final imageController = TextEditingController(text: item?.imageUrl ?? '');
     
-    Uint8List? selectedImageBytes;
-    String? currentImageUrl = item?.imageUrl;
+    // 分類選擇 (預設為 Cotton 或原本的分類)
+    String selectedCategory = item?.category ?? 'Cotton';
+    // 確保選取的分類在清單內 (排除 'All')
+    if (selectedCategory == 'All' || !_categories.contains(selectedCategory)) {
+      selectedCategory = 'Other';
+    }
 
     showDialog(
       context: context,
-      barrierDismissible: !_isUploading, // 上傳中禁止關閉
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: Text(item == null ? 'Add to Catalog' : 'Edit Fabric'),
-              content: SingleChildScrollView(
-                child: Form(
-                  key: formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text(item == null ? 'Add Fabric' : 'Edit Fabric'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 1. 分類選擇
+                  DropdownButtonFormField<String>(
+                    value: selectedCategory,
+                    decoration: const InputDecoration(labelText: 'Category'),
+                    items: _categories
+                        .where((c) => c != 'All') // 排除 'All' 選項
+                        .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                        .toList(),
+                    onChanged: (val) => setDialogState(() => selectedCategory = val!),
+                  ),
+                  const SizedBox(height: 12),
+                  
+                  TextFormField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Name'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: costController,
+                    decoration: const InputDecoration(labelText: 'Cost Per Unit'),
+                    keyboardType: TextInputType.number,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
                     children: [
-                      // === 1. 圖片選取區塊 ===
-                      GestureDetector(
-                        onTap: () async {
-                          final picker = ImagePicker();
-                          final XFile? image = await picker.pickImage(
-                            source: ImageSource.gallery,
-                            imageQuality: 80, // 壓縮圖片品質
-                          );
-                          
-                          if (image != null) {
-                            final bytes = await image.readAsBytes();
-                            setDialogState(() {
-                              selectedImageBytes = bytes;
-                            });
-                          }
-                        },
-                        child: Container(
-                          height: 180,
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            color: Colors.grey[200],
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.grey[300]!),
-                            image: selectedImageBytes != null
-                                ? DecorationImage(
-                                    image: MemoryImage(selectedImageBytes!),
-                                    fit: BoxFit.cover,
-                                  )
-                                : (currentImageUrl != null && currentImageUrl.isNotEmpty
-                                    ? DecorationImage(
-                                        image: NetworkImage(currentImageUrl),
-                                        fit: BoxFit.cover,
-                                      )
-                                    : null),
-                          ),
-                          child: (selectedImageBytes == null && (currentImageUrl == null || currentImageUrl.isEmpty))
-                              ? Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.add_a_photo, size: 40, color: Colors.grey[500]),
-                                    const SizedBox(height: 8),
-                                    Text("Tap to add photo", style: TextStyle(color: Colors.grey[600])),
-                                  ],
-                                )
-                              : null,
+                      Expanded(
+                        child: TextFormField(
+                          controller: stockController,
+                          decoration: const InputDecoration(labelText: 'Stock'),
+                          keyboardType: TextInputType.number,
                         ),
                       ),
-                      const SizedBox(height: 24),
-
-                      // === 2. 基本資料欄位 ===
-                      TextFormField(
-                        controller: nameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Fabric Name',
-                          prefixIcon: Icon(Icons.label_outline),
-                          border: OutlineInputBorder(),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: unitController,
+                          decoration: const InputDecoration(labelText: 'Unit (e.g. m, yd)'),
                         ),
-                        validator: (v) => v!.isEmpty ? 'Name is required' : null,
-                      ),
-                      const SizedBox(height: 16),
-                      
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: categoryController,
-                              decoration: const InputDecoration(
-                                labelText: 'Category',
-                                prefixIcon: Icon(Icons.category_outlined),
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: TextFormField(
-                              controller: costController,
-                              decoration: const InputDecoration(
-                                labelText: 'Cost',
-                                prefixIcon: Icon(Icons.attach_money),
-                                border: OutlineInputBorder(),
-                              ),
-                              keyboardType: TextInputType.number,
-                              validator: (v) => v!.isEmpty ? 'Required' : null,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      
-                      TextFormField(
-                        controller: descController,
-                        decoration: const InputDecoration(
-                          labelText: 'Description (e.g. 100% Wool)',
-                          prefixIcon: Icon(Icons.description_outlined),
-                          border: OutlineInputBorder(),
-                        ),
-                        maxLines: 2,
                       ),
                     ],
                   ),
-                ),
-              ),
-              actions: [
-                if (!_isUploading)
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: reorderController,
+                    decoration: const InputDecoration(labelText: 'Reorder Level'),
+                    keyboardType: TextInputType.number,
                   ),
-                
-                ElevatedButton(
-                  onPressed: _isUploading 
-                    ? null 
-                    : () async {
-                      if (formKey.currentState!.validate()) {
-                        setDialogState(() => _isUploading = true); // 開始轉圈
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: imageController,
+                    decoration: const InputDecoration(labelText: 'Image URL (Optional)'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final newItem = MaterialItem(
+                    id: item?.id ?? '',
+                    name: nameController.text,
+                    costPerUnit: double.tryParse(costController.text) ?? 0,
+                    stock: double.tryParse(stockController.text) ?? 0,
+                    reorderLevel: double.tryParse(reorderController.text) ?? 0,
+                    unit: unitController.text,
+                    imageUrl: imageController.text.isEmpty ? null : imageController.text,
+                    category: selectedCategory, // 儲存分類
+                  );
 
-                        try {
-                          String? finalImageUrl = currentImageUrl;
-
-                          // === 處理圖片上傳 ===
-                          if (selectedImageBytes != null) {
-                            final String fileName = DateTime.now().millisecondsSinceEpoch.toString();
-                            final ref = FirebaseStorage.instance.ref().child('fabrics/$fileName.jpg');
-                            
-                            final metadata = SettableMetadata(contentType: 'image/jpeg');
-                            await ref.putData(selectedImageBytes!, metadata);
-                            
-                            finalImageUrl = await ref.getDownloadURL();
-                          }
-
-                          // === 建立資料物件 ===
-                          final newItem = MaterialItem(
-                            id: item?.id ?? '', 
-                            name: nameController.text,
-                            category: categoryController.text,
-                            unit: unitController.text,
-                            costPerUnit: double.tryParse(costController.text) ?? 0.0,
-                            imageUrl: finalImageUrl,
-                            description: descController.text,
-                          );
-
-                          // === 寫入 Firestore ===
-                          if (item == null) {
-                            await _dbService.addMaterial(newItem);
-                          } else {
-                            await _dbService.updateMaterial(newItem);
-                          }
-
-                          if (mounted) {
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Saved successfully!'), backgroundColor: Colors.green),
-                            );
-                          }
-                        } catch (e) {
-                          print('Error uploading: $e');
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-                            );
-                          }
-                        } finally {
-                          if (mounted) {
-                            setDialogState(() => _isUploading = false);
-                          }
-                        }
-                      }
-                    },
-                  child: _isUploading 
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) 
-                    : Text(item == null ? 'Add' : 'Save'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+                  if (item == null) {
+                    await _dbService.addMaterial(newItem);
+                  } else {
+                    await _dbService.updateMaterial(newItem);
+                  }
+                  if (mounted) Navigator.pop(context);
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        }
+      ),
     );
   }
 
@@ -228,194 +149,132 @@ class _FabricPageState extends State<FabricPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Fabric Catalog'),
-        elevation: 0,
+        title: const Text('Fabric Inventory'),
+        // 2. 加入 TabBar
+        bottom: TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          tabs: _categories.map((c) => Tab(text: c)).toList(),
+        ),
       ),
       body: StreamBuilder<List<MaterialItem>>(
         stream: _dbService.getInventoryStream(),
         builder: (context, snapshot) {
           if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
 
-          final materials = snapshot.data ?? [];
+          final allFabrics = snapshot.data ?? [];
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header Area
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
+          // 3. 使用 TabBarView 顯示對應內容
+          return TabBarView(
+            controller: _tabController,
+            children: _categories.map((category) {
+              // 篩選邏輯
+              final filteredFabrics = category == 'All'
+                  ? allFabrics
+                  : allFabrics.where((f) => f.category == category).toList();
+
+              if (filteredFabrics.isEmpty) {
+                return Center(
+                  child: Text('No $category fabrics found', style: const TextStyle(color: Colors.grey)),
+                );
+              }
+
+              return ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: filteredFabrics.length,
+                separatorBuilder: (_, __) => const Divider(),
+                itemBuilder: (context, index) {
+                  final fabric = filteredFabrics[index];
+                  // 檢查庫存量是否過低
+                  final isLowStock = fabric.stock <= fabric.reorderLevel;
+
+                  return ListTile(
+                    leading: Container(
+                      width: 50,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[200],
+                        borderRadius: BorderRadius.circular(8),
+                        image: (fabric.imageUrl != null && fabric.imageUrl!.isNotEmpty)
+                            ? DecorationImage(image: NetworkImage(fabric.imageUrl!), fit: BoxFit.cover)
+                            : null,
+                      ),
+                      child: (fabric.imageUrl == null || fabric.imageUrl!.isEmpty)
+                          ? const Icon(Icons.texture, color: Colors.grey)
+                          : null,
+                    ),
+                    title: Text(fabric.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Fabric Catalog',
-                          style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${materials.length} items in library',
-                          style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                        Text('Cost: \$${fabric.costPerUnit.toStringAsFixed(0)} / ${fabric.unit}'),
+                        // 顯示分類標籤
+                        Container(
+                          margin: const EdgeInsets.only(top: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(fabric.category, style: const TextStyle(fontSize: 10, color: Colors.blue)),
                         ),
                       ],
                     ),
-                    FloatingActionButton.extended(
-                      onPressed: () => _showFabricDialog(context),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add New'),
-                      backgroundColor: Theme.of(context).primaryColor,
-                      foregroundColor: Colors.white,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              '${fabric.stock.toStringAsFixed(1)} ${fabric.unit}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: isLowStock ? Colors.red : Colors.green,
+                              ),
+                            ),
+                            if (isLowStock)
+                              const Text('Low Stock', style: TextStyle(fontSize: 10, color: Colors.red)),
+                          ],
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.edit, color: Colors.blue),
+                          onPressed: () => _showAddEditDialog(item: fabric),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () async {
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Delete Fabric'),
+                                content: Text('Are you sure you want to delete ${fabric.name}?'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                  ElevatedButton(onPressed: () => Navigator.pop(ctx, true), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text('Delete')),
+                                ],
+                              ),
+                            );
+                            if (confirm == true) {
+                              await _dbService.deleteMaterial(fabric.id);
+                            }
+                          },
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                const SizedBox(height: 32),
-
-                // Grid View for Catalog style
-                if (materials.isEmpty)
-                  const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(40), 
-                      child: Text("No fabrics in catalog yet.\nClick 'Add New' to start.", textAlign: TextAlign.center)
-                    )
-                  )
-                else
-                  // 使用 GridView 或 ListView，這裡用 ListView + Card 呈現型錄感
-                  ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: materials.length,
-                    separatorBuilder: (ctx, index) => const SizedBox(height: 16),
-                    itemBuilder: (context, index) {
-                      return _buildCatalogCard(context, materials[index]);
-                    },
-                  ),
-              ],
-            ),
+                  );
+                },
+              );
+            }).toList(),
           );
         },
       ),
-    );
-  }
-
-  Widget _buildCatalogCard(BuildContext context, MaterialItem item) {
-    return Card(
-      elevation: 2,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell(
-        onTap: () => _showFabricDialog(context, item: item), // 點擊整張卡片編輯
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 左側圖片區
-            SizedBox(
-              width: 120,
-              height: 120,
-              child: item.imageUrl != null && item.imageUrl!.isNotEmpty
-                  ? Image.network(
-                      item.imageUrl!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => 
-                          Container(color: Colors.grey[200], child: const Icon(Icons.broken_image, color: Colors.grey)),
-                    )
-                  : Container(
-                      color: Colors.blue[50],
-                      child: Icon(Icons.texture, size: 40, color: Colors.blue[200]),
-                    ),
-            ),
-            
-            // 右側資訊區
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            item.name,
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[100],
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            item.category,
-                            style: const TextStyle(fontSize: 12, color: Colors.black54),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      item.description.isNotEmpty ? item.description : 'No description',
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '\$${item.costPerUnit.toStringAsFixed(0)} / ${item.unit}',
-                          style: TextStyle(
-                            fontSize: 16, 
-                            fontWeight: FontWeight.bold, 
-                            color: Theme.of(context).primaryColor
-                          ),
-                        ),
-                        // 刪除按鈕 (避免誤觸，做成小圖示)
-                        InkWell(
-                          onTap: () {
-                             _showDeleteConfirm(context, item);
-                          },
-                          child: const Padding(
-                            padding: EdgeInsets.all(4.0),
-                            child: Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showDeleteConfirm(BuildContext context, MaterialItem item) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Fabric'),
-        content: Text('Are you sure you want to delete "${item.name}"?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () {
-              _dbService.deleteMaterial(item.id);
-              Navigator.pop(ctx);
-            }, 
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showAddEditDialog(),
+        child: const Icon(Icons.add),
       ),
     );
   }
