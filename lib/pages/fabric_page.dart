@@ -1,4 +1,7 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import '../models/material_item.dart';
 import '../services/database_service.dart';
 
@@ -12,11 +15,10 @@ class FabricPage extends StatefulWidget {
 class _FabricPageState extends State<FabricPage> with SingleTickerProviderStateMixin {
   final DatabaseService _dbService = DatabaseService();
   
-  // 定義分類清單
   final List<String> _categories = ['All', 'Cotton', 'Linen', 'Wool', 'Other'];
   
-  // 控制選中的 Tab
   late TabController _tabController;
+  bool _isUploading = false;
 
   @override
   void initState() {
@@ -30,24 +32,45 @@ class _FabricPageState extends State<FabricPage> with SingleTickerProviderStateM
     super.dispose();
   }
 
-  // === 新增/編輯 對話框 ===
+  Future<String?> _uploadImage(Uint8List fileData) async {
+    try {
+      final String fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final Reference storageRef = FirebaseStorage.instance.ref().child('fabric_images').child(fileName);
+      final SettableMetadata metadata = SettableMetadata(contentType: 'image/jpeg');
+      final UploadTask uploadTask = storageRef.putData(fileData, metadata);
+      final TaskSnapshot snapshot = await uploadTask;
+      return await snapshot.ref.getDownloadURL();
+    } catch (e) {
+      print('Error uploading image: $e');
+      return null;
+    }
+  }
+
+  // === 新增/編輯 對話框 (穩健版：防卡死 + 錯誤提示) ===
   void _showAddEditDialog({MaterialItem? item}) {
     final nameController = TextEditingController(text: item?.name ?? '');
     final costController = TextEditingController(text: item?.costPerUnit.toString() ?? '');
     final stockController = TextEditingController(text: item?.stock.toString() ?? '');
     final reorderController = TextEditingController(text: item?.reorderLevel.toString() ?? '10');
     final unitController = TextEditingController(text: item?.unit ?? 'm');
-    final imageController = TextEditingController(text: item?.imageUrl ?? '');
     
-    // 分類選擇 (預設為 Cotton 或原本的分類)
+    final retailPriceController = TextEditingController(text: item?.retailPrice.toString() ?? '');
+    bool isOnline = item?.isOnline ?? false;
+
     String selectedCategory = item?.category ?? 'Cotton';
-    // 確保選取的分類在清單內 (排除 'All')
     if (selectedCategory == 'All' || !_categories.contains(selectedCategory)) {
       selectedCategory = 'Other';
     }
 
+    Uint8List? pickedImageBytes;
+    String? currentImageUrl = item?.imageUrl;
+    
+    // 背景上傳任務
+    Future<String?>? backgroundUploadTask; 
+
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
@@ -55,13 +78,73 @@ class _FabricPageState extends State<FabricPage> with SingleTickerProviderStateM
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 1. 分類選擇
+                  // 圖片選取區
+                  Center(
+                    child: GestureDetector(
+                      onTap: () async {
+                        final ImagePicker picker = ImagePicker();
+                        final XFile? image = await picker.pickImage(
+                          source: ImageSource.gallery,
+                          maxWidth: 1024, // 適度壓縮：限制寬度 1024px，避免檔案過大卡死
+                          imageQuality: 85,
+                        );
+                        
+                        if (image != null) {
+                          final bytes = await image.readAsBytes();
+                          
+                          // 開始背景上傳
+                          backgroundUploadTask = _uploadImage(bytes);
+                          
+                          setDialogState(() {
+                            pickedImageBytes = bytes;
+                          });
+                        }
+                      },
+                      child: Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey[400]!),
+                          image: pickedImageBytes != null
+                              ? DecorationImage(image: MemoryImage(pickedImageBytes!), fit: BoxFit.cover)
+                              : (currentImageUrl != null && currentImageUrl!.isNotEmpty
+                                  ? DecorationImage(image: NetworkImage(currentImageUrl!), fit: BoxFit.cover)
+                                  : null),
+                        ),
+                        child: (pickedImageBytes == null && (currentImageUrl == null || currentImageUrl!.isEmpty))
+                            ? const Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.add_a_photo, color: Colors.grey),
+                                  SizedBox(height: 4),
+                                  Text('Add Photo', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                                ],
+                              )
+                            : null,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  SwitchListTile(
+                    title: const Text('Available Online'),
+                    subtitle: Text(isOnline ? 'Visible to customers' : 'Hidden from store'),
+                    value: isOnline,
+                    activeColor: Colors.green,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) => setDialogState(() => isOnline = val),
+                  ),
+                  const Divider(),
+
                   DropdownButtonFormField<String>(
                     value: selectedCategory,
                     decoration: const InputDecoration(labelText: 'Category'),
                     items: _categories
-                        .where((c) => c != 'All') // 排除 'All' 選項
+                        .where((c) => c != 'All')
                         .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                         .toList(),
                     onChanged: (val) => setDialogState(() => selectedCategory = val!),
@@ -73,12 +156,31 @@ class _FabricPageState extends State<FabricPage> with SingleTickerProviderStateM
                     decoration: const InputDecoration(labelText: 'Name'),
                   ),
                   const SizedBox(height: 12),
-                  TextFormField(
-                    controller: costController,
-                    decoration: const InputDecoration(labelText: 'Cost Per Unit'),
-                    keyboardType: TextInputType.number,
+                  
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: costController,
+                          decoration: const InputDecoration(labelText: 'Cost Price'),
+                          keyboardType: TextInputType.number,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: retailPriceController,
+                          decoration: const InputDecoration(
+                            labelText: 'Retail Price', 
+                            suffixText: '\$',
+                          ),
+                          keyboardType: TextInputType.number,
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
+                  
                   Row(
                     children: [
                       Expanded(
@@ -92,7 +194,7 @@ class _FabricPageState extends State<FabricPage> with SingleTickerProviderStateM
                       Expanded(
                         child: TextFormField(
                           controller: unitController,
-                          decoration: const InputDecoration(labelText: 'Unit (e.g. m, yd)'),
+                          decoration: const InputDecoration(labelText: 'Unit'),
                         ),
                       ),
                     ],
@@ -103,40 +205,84 @@ class _FabricPageState extends State<FabricPage> with SingleTickerProviderStateM
                     decoration: const InputDecoration(labelText: 'Reorder Level'),
                     keyboardType: TextInputType.number,
                   ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: imageController,
-                    decoration: const InputDecoration(labelText: 'Image URL (Optional)'),
-                  ),
+                  
+                  // 顯示載入中狀態
+                  if (_isUploading)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 16.0),
+                      child: Column(
+                        children: [
+                          LinearProgressIndicator(),
+                          SizedBox(height: 4),
+                          Text("Saving data...", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: _isUploading ? null : () => Navigator.pop(context),
                 child: const Text('Cancel'),
               ),
               ElevatedButton(
-                onPressed: () async {
-                  final newItem = MaterialItem(
-                    id: item?.id ?? '',
-                    name: nameController.text,
-                    costPerUnit: double.tryParse(costController.text) ?? 0,
-                    stock: double.tryParse(stockController.text) ?? 0,
-                    reorderLevel: double.tryParse(reorderController.text) ?? 0,
-                    unit: unitController.text,
-                    imageUrl: imageController.text.isEmpty ? null : imageController.text,
-                    category: selectedCategory, // 儲存分類
-                  );
+                // 只有在非上傳狀態才允許點擊
+                onPressed: _isUploading ? null : () async {
+                  setDialogState(() => _isUploading = true);
 
-                  if (item == null) {
-                    await _dbService.addMaterial(newItem);
-                  } else {
-                    await _dbService.updateMaterial(newItem);
+                  try {
+                    String? finalImageUrl = currentImageUrl;
+                    
+                    // 等待背景上傳完成
+                    if (backgroundUploadTask != null) {
+                      // 設定 20 秒超時，避免無限等待
+                      finalImageUrl = await backgroundUploadTask!.timeout(
+                        const Duration(seconds: 20),
+                        onTimeout: () => null,
+                      );
+                      
+                      // 如果有選圖但網址是 null，代表上傳失敗
+                      if (finalImageUrl == null) {
+                        throw Exception('Image upload failed or timed out. Please try again.');
+                      }
+                    }
+
+                    final newItem = MaterialItem(
+                      id: item?.id ?? '',
+                      name: nameController.text,
+                      costPerUnit: double.tryParse(costController.text) ?? 0,
+                      stock: double.tryParse(stockController.text) ?? 0,
+                      reorderLevel: double.tryParse(reorderController.text) ?? 0,
+                      unit: unitController.text,
+                      imageUrl: finalImageUrl,
+                      category: selectedCategory,
+                      retailPrice: double.tryParse(retailPriceController.text) ?? 0,
+                      isOnline: isOnline,
+                    );
+
+                    if (item == null) {
+                      await _dbService.addMaterial(newItem);
+                    } else {
+                      await _dbService.updateMaterial(newItem);
+                    }
+                    
+                    if (mounted) Navigator.pop(context);
+                  } catch (e) {
+                    print('Error saving material: $e');
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Save failed: $e'), backgroundColor: Colors.red),
+                      );
+                    }
+                  } finally {
+                    // 無論成功或失敗，都恢復按鈕狀態，避免卡死
+                    if (mounted) {
+                      setDialogState(() => _isUploading = false);
+                    }
                   }
-                  if (mounted) Navigator.pop(context);
                 },
-                child: const Text('Save'),
+                child: Text(_isUploading ? 'Saving...' : 'Save'),
               ),
             ],
           );
@@ -150,7 +296,6 @@ class _FabricPageState extends State<FabricPage> with SingleTickerProviderStateM
     return Scaffold(
       appBar: AppBar(
         title: const Text('Fabric Inventory'),
-        // 2. 加入 TabBar
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
@@ -165,18 +310,23 @@ class _FabricPageState extends State<FabricPage> with SingleTickerProviderStateM
 
           final allFabrics = snapshot.data ?? [];
 
-          // 3. 使用 TabBarView 顯示對應內容
           return TabBarView(
             controller: _tabController,
             children: _categories.map((category) {
-              // 篩選邏輯
               final filteredFabrics = category == 'All'
                   ? allFabrics
                   : allFabrics.where((f) => f.category == category).toList();
 
               if (filteredFabrics.isEmpty) {
                 return Center(
-                  child: Text('No $category fabrics found', style: const TextStyle(color: Colors.grey)),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.inventory_2_outlined, size: 64, color: Colors.grey[300]),
+                      const SizedBox(height: 16),
+                      Text('No $category fabrics found', style: const TextStyle(color: Colors.grey)),
+                    ],
+                  ),
                 );
               }
 
@@ -186,38 +336,77 @@ class _FabricPageState extends State<FabricPage> with SingleTickerProviderStateM
                 separatorBuilder: (_, __) => const Divider(),
                 itemBuilder: (context, index) {
                   final fabric = filteredFabrics[index];
-                  // 檢查庫存量是否過低
                   final isLowStock = fabric.stock <= fabric.reorderLevel;
 
                   return ListTile(
-                    leading: Container(
-                      width: 50,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[200],
-                        borderRadius: BorderRadius.circular(8),
-                        image: (fabric.imageUrl != null && fabric.imageUrl!.isNotEmpty)
-                            ? DecorationImage(image: NetworkImage(fabric.imageUrl!), fit: BoxFit.cover)
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    leading: GestureDetector(
+                      onTap: () {
+                        if (fabric.imageUrl != null && fabric.imageUrl!.isNotEmpty) {
+                          showDialog(
+                            context: context,
+                            builder: (_) => Dialog(child: Image.network(fabric.imageUrl!)),
+                          );
+                        }
+                      },
+                      child: Container(
+                        width: 60,
+                        height: 60,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey[300]!),
+                          image: (fabric.imageUrl != null && fabric.imageUrl!.isNotEmpty)
+                              ? DecorationImage(image: NetworkImage(fabric.imageUrl!), fit: BoxFit.cover)
+                              : null,
+                        ),
+                        child: (fabric.imageUrl == null || fabric.imageUrl!.isEmpty)
+                            ? const Icon(Icons.texture, color: Colors.grey)
                             : null,
                       ),
-                      child: (fabric.imageUrl == null || fabric.imageUrl!.isEmpty)
-                          ? const Icon(Icons.texture, color: Colors.grey)
-                          : null,
                     ),
-                    title: Text(fabric.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    title: Row(
+                      children: [
+                        Expanded(child: Text(fabric.name, style: const TextStyle(fontWeight: FontWeight.bold))),
+                        // 顯示上架狀態圖示
+                        if (fabric.isOnline)
+                          const Tooltip(
+                            message: 'Online',
+                            child: Icon(Icons.public, size: 16, color: Colors.green),
+                          )
+                        else
+                          const Tooltip(
+                            message: 'Offline',
+                            child: Icon(Icons.public_off, size: 16, color: Colors.grey),
+                          ),
+                      ],
+                    ),
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Cost: \$${fabric.costPerUnit.toStringAsFixed(0)} / ${fabric.unit}'),
-                        // 顯示分類標籤
+                        const SizedBox(height: 4),
+                        // 顯示成本與零售價
+                        Row(
+                          children: [
+                            Text(
+                              'Cost: \$${fabric.costPerUnit.toStringAsFixed(0)}',
+                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Retail: \$${fabric.retailPrice.toStringAsFixed(0)}',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
                         Container(
-                          margin: const EdgeInsets.only(top: 4),
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
-                            color: Colors.blue.withOpacity(0.1),
+                            color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: Text(fabric.category, style: const TextStyle(fontSize: 10, color: Colors.blue)),
+                          child: Text(fabric.category, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary)),
                         ),
                       ],
                     ),
@@ -232,14 +421,15 @@ class _FabricPageState extends State<FabricPage> with SingleTickerProviderStateM
                               '${fabric.stock.toStringAsFixed(1)} ${fabric.unit}',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
+                                fontSize: 16,
                                 color: isLowStock ? Colors.red : Colors.green,
                               ),
                             ),
                             if (isLowStock)
-                              const Text('Low Stock', style: TextStyle(fontSize: 10, color: Colors.red)),
+                              const Text('Low Stock', style: TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.bold)),
                           ],
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 16),
                         IconButton(
                           icon: const Icon(Icons.edit, color: Colors.blue),
                           onPressed: () => _showAddEditDialog(item: fabric),
@@ -251,7 +441,7 @@ class _FabricPageState extends State<FabricPage> with SingleTickerProviderStateM
                               context: context,
                               builder: (ctx) => AlertDialog(
                                 title: const Text('Delete Fabric'),
-                                content: Text('Are you sure you want to delete ${fabric.name}?'),
+                                content: Text('Delete ${fabric.name}?'),
                                 actions: [
                                   TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
                                   ElevatedButton(onPressed: () => Navigator.pop(ctx, true), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text('Delete')),

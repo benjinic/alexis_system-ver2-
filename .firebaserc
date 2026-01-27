@@ -5,7 +5,7 @@
   "targets": {
     "alexis-tailor-system-2025": {
       "hosting": {
-        "main": [
+        "prod": [
           "alexis-tailor-system-2025"
         ]
       }

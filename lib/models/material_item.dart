@@ -1,13 +1,16 @@
 class MaterialItem {
   final String id;
   final String name;
-  final double costPerUnit;
+  final double costPerUnit; // 成本價
   final String unit;
   final double stock;
   final double reorderLevel;
   final String? imageUrl;
-  // 1. 新增分類欄位
-  final String category; 
+  final String category;
+  
+  // === 1. 新增欄位 ===
+  final double retailPrice; // 零售價
+  final bool isOnline;      // 是否上架 (Online Status)
 
   MaterialItem({
     required this.id,
@@ -17,8 +20,10 @@ class MaterialItem {
     required this.stock,
     required this.reorderLevel,
     this.imageUrl,
-    // 預設為 'Other' 以相容舊資料
-    this.category = 'Other', 
+    this.category = 'Other',
+    // === 2. 初始化預設值 ===
+    this.retailPrice = 0.0,
+    this.isOnline = false, 
   });
 
   factory MaterialItem.fromMap(String id, Map<dynamic, dynamic> map) {
@@ -30,8 +35,10 @@ class MaterialItem {
       stock: (map['stock'] ?? 0).toDouble(),
       reorderLevel: (map['reorderLevel'] ?? 0).toDouble(),
       imageUrl: map['imageUrl'],
-      // 讀取分類，若無則設為 Other
-      category: map['category'] ?? 'Other', 
+      category: map['category'] ?? 'Other',
+      // === 3. 讀取新欄位 ===
+      retailPrice: (map['retailPrice'] ?? 0).toDouble(),
+      isOnline: map['isOnline'] ?? false,
     );
   }
 
@@ -43,8 +50,10 @@ class MaterialItem {
       'stock': stock,
       'reorderLevel': reorderLevel,
       'imageUrl': imageUrl,
-      // 寫入分類
-      'category': category, 
+      'category': category,
+      // === 4. 寫入新欄位 ===
+      'retailPrice': retailPrice,
+      'isOnline': isOnline,
     };
   }
 }

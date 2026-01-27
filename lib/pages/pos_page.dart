@@ -7,11 +7,10 @@ import '../models/order.dart';
 import '../models/workshop_order.dart';
 import '../models/workshop_status.dart';
 import '../models/customer.dart';
-import '../models/material_item.dart';
-import '../models/service_item.dart';
 import '../services/database_service.dart';
 import '../services/pdf_service.dart';
 import '../providers/cart_provider.dart';
+import '../components/order_item_dialog.dart';
 
 class POSPage extends StatefulWidget {
   final Order? orderForEdit;
@@ -378,335 +377,12 @@ class _POSPageState extends State<POSPage> {
     );
   }
 
-  void _showItemDialog({OrderItem? existingItem, int? index}) async {
-    // 1. 讀取庫存 (Fabric)
-    final fabrics = await _dbService.getInventory();
-
-    if (!mounted) return;
-
-    // 初始化數值控制器
-    final priceController = TextEditingController(text: existingItem?.price.toStringAsFixed(0) ?? '');
-    final usageController = TextEditingController(text: existingItem?.fabricUsed.toString() ?? '0');
-    final quantityController = TextEditingController(text: existingItem?.quantity.toString() ?? '1');
-    final suggestedPriceController = TextEditingController();
-    
-    // 2. 初始化搜尋控制器 (新增 fabricSearchController)
-    final searchController = TextEditingController();       // 服務搜尋
-    final fabricSearchController = TextEditingController(); // 布料搜尋 <--- 新增此行
-
-    ServiceItem? selectedService;
-    MaterialItem? selectedFabric;
-
-    // 若為編輯模式，還原已選資料
-    if (existingItem != null) {
-      // 還原服務
-      // (注意：服務的 selectedService 還原會由 StreamBuilder 內的邏輯處理)
-      
-      // 還原布料
-      if (existingItem.fabricId != null) {
-        try {
-          selectedFabric = fabrics.firstWhere((f) => f.id == existingItem.fabricId);
-        } catch (_) {}
-      }
-    }
-
-    // 計算價格邏輯
-    void calculateValues() {
-      if (selectedService != null) {
-        double servicePrice = selectedService!.price;
-        double fabricUnitCost = selectedFabric?.costPerUnit ?? 0.0;
-        double currentUsage = double.tryParse(usageController.text) ?? 0.0;
-
-        double totalFabricCost = fabricUnitCost * currentUsage;
-        double suggestedPrice = (servicePrice + totalFabricCost) * 2.5;
-
-        suggestedPriceController.text = suggestedPrice.toStringAsFixed(0);
-
-        // 如果是新增模式且價格為空，才自動填入
-        if (priceController.text.isEmpty) {
-          priceController.text = suggestedPrice.toStringAsFixed(0);
-        }
-      }
-    }
-
-    if (existingItem != null) calculateValues();
-
-    await showDialog(
+  void _openItemDialog({OrderItem? existingItem, int? index}) {
+    showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          double currentUsage = double.tryParse(usageController.text) ?? 0.0;
-          double estimatedMaterialCost = 0;
-
-          if (selectedService != null && selectedFabric != null) {
-            estimatedMaterialCost = currentUsage * selectedFabric!.costPerUnit;
-          }
-
-          // 3. 布料篩選邏輯 (根據輸入過濾列表)
-          final fabricSearchQuery = fabricSearchController.text.toLowerCase();
-          final filteredFabrics = fabrics.where((f) {
-            return f.name.toLowerCase().contains(fabricSearchQuery) || 
-                   f.id.toLowerCase().contains(fabricSearchQuery);
-          }).toList();
-
-          return AlertDialog(
-            title: Text(existingItem != null ? 'Edit Item' : 'Add Item'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // === 區塊 1: 服務搜尋與選擇 ===
-                  TextField(
-                    controller: searchController,
-                    decoration: InputDecoration(
-                      hintText: 'Search services...',
-                      prefixIcon: const Icon(Icons.search),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      filled: true,
-                      fillColor: Theme.of(context).brightness == Brightness.dark 
-                          ? Colors.grey[800] 
-                          : Colors.grey[100],
-                    ),
-                    onChanged: (value) => setDialogState(() {}),
-                  ),
-                  const SizedBox(height: 12),
-
-                  StreamBuilder<List<ServiceItem>>(
-                    stream: _dbService.getServicesStream(),
-                    builder: (context, snapshot) {
-                      if (snapshot.hasError) return Text('Error: ${snapshot.error}');
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 16.0),
-                          child: Center(child: CircularProgressIndicator()),
-                        );
-                      }
-
-                      final allServices = snapshot.data ?? [];
-                      final searchQuery = searchController.text.toLowerCase();
-                      final filteredServices = allServices.where((s) {
-                        return s.name.toLowerCase().contains(searchQuery);
-                      }).toList();
-
-                      // 自動對應編輯中的項目 (僅在 selectedService 為空時執行)
-                      if (existingItem != null && selectedService == null && allServices.isNotEmpty) {
-                         try {
-                           final foundService = allServices.firstWhere((s) => s.name == existingItem.service);
-                           selectedService = foundService;
-                         } catch (_) {}
-                      }
-
-                      if (allServices.isEmpty) return const Text('No services defined.');
-                      if (filteredServices.isEmpty) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8.0),
-                          child: Text('No results for "$searchQuery"', style: const TextStyle(color: Colors.grey)),
-                        );
-                      }
-
-                      return ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 200), 
-                        child: SingleChildScrollView(
-                          child: Wrap(
-                            spacing: 8.0,
-                            runSpacing: 8.0,
-                            children: filteredServices.map((service) {
-                              final isSelected = selectedService?.id == service.id;
-                              return ChoiceChip(
-                                label: Text('${service.name}'),
-                                selected: isSelected,
-                                onSelected: (selected) {
-                                  setDialogState(() {
-                                    selectedService = selected ? service : null;
-                                    if (selected) {
-                                      if (usageController.text == '0') {
-                                        usageController.text = service.defaultFabricUsage.toString();
-                                      }
-                                      if (service.defaultFabricUsage == 0) selectedFabric = null;
-                                      if (existingItem == null) priceController.clear();
-                                      calculateValues();
-                                    }
-                                  });
-                                },
-                              );
-                            }).toList(),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  
-                  const SizedBox(height: 16),
-                  const Divider(),
-                  const SizedBox(height: 16),
-                  
-                  // === 區塊 2: 布料搜尋與選擇 (已移除 Dropdown，改為搜尋+列表) ===
-                  if (selectedService != null && (selectedService!.defaultFabricUsage > 0 || (existingItem?.fabricUsed ?? 0) > 0)) ...[
-                    const Text('Select Fabric', style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    
-                    // 4. 布料搜尋框
-                    TextField(
-                      controller: fabricSearchController,
-                      decoration: InputDecoration(
-                        hintText: 'Search fabric name or ID...',
-                        prefixIcon: const Icon(Icons.search),
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                        filled: true,
-                        fillColor: Theme.of(context).brightness == Brightness.dark 
-                            ? Colors.grey[800] 
-                            : Colors.grey[100],
-                      ),
-                      onChanged: (value) => setDialogState(() {}),
-                    ),
-                    const SizedBox(height: 8),
-
-                    // 5. 布料結果列表
-                    if (filteredFabrics.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(8.0),
-                        child: Text('No fabric found', style: TextStyle(color: Colors.grey)),
-                      )
-                    else
-                      Container(
-                        height: 150, // 固定高度讓列表可捲動
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: ListView.separated(
-                          padding: EdgeInsets.zero,
-                          itemCount: filteredFabrics.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            final fabric = filteredFabrics[index];
-                            final isSelected = selectedFabric?.id == fabric.id;
-                            
-                            return ListTile(
-                              dense: true,
-                              selected: isSelected,
-                              selectedTileColor: Theme.of(context).primaryColor.withValues(alpha: 0.1),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                              leading: Container(
-                                width: 30, height: 30,
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[300],
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                clipBehavior: Clip.antiAlias,
-                                child: (fabric.imageUrl?.isNotEmpty ?? false)
-                                    ? Image.network(fabric.imageUrl!, fit: BoxFit.cover)
-                                    : const Icon(Icons.texture, size: 16),
-                              ),
-                              title: Text(fabric.name, overflow: TextOverflow.ellipsis),
-                              subtitle: Text('\$${fabric.costPerUnit.toStringAsFixed(0)} / ${fabric.unit}'),
-                              trailing: isSelected ? Icon(Icons.check_circle, size: 18, color: Theme.of(context).primaryColor) : null,
-                              onTap: () {
-                                setDialogState(() {
-                                  selectedFabric = fabric;
-                                  calculateValues();
-                                });
-                              },
-                            );
-                          },
-                        ),
-                      ),
-                    
-                    const SizedBox(height: 16),
-                    
-                    // 布料用量
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: usageController,
-                            decoration: const InputDecoration(labelText: 'Usage (m)', border: OutlineInputBorder()),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            onChanged: (_) {
-                              setDialogState(() {});
-                              calculateValues();
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Est. Cost', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                            Text('\$${estimatedMaterialCost.toStringAsFixed(0)}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-
-                  // === 區塊 3: 價格與數量 ===
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: TextFormField(
-                          controller: priceController,
-                          decoration: const InputDecoration(labelText: 'Unit Price', prefixIcon: Icon(Icons.attach_money), border: OutlineInputBorder()),
-                          keyboardType: TextInputType.number,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 1,
-                        child: TextFormField(
-                          controller: quantityController,
-                          decoration: const InputDecoration(labelText: 'Qty', prefixIcon: Icon(Icons.numbers), border: OutlineInputBorder()),
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-              ElevatedButton(
-                onPressed: (selectedService == null)
-                    ? null
-                    : () {
-                        final double finalPrice = double.tryParse(priceController.text) ?? selectedService!.price;
-                        final double finalUsage = double.tryParse(usageController.text) ?? 0.0;
-                        final int finalQty = int.tryParse(quantityController.text) ?? 1;
-
-                        final newItem = OrderItem(
-                          id: existingItem?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-                          service: selectedService!.name,
-                          price: finalPrice,
-                          quantity: finalQty,
-                          fabricId: selectedFabric?.id,
-                          fabricName: selectedFabric?.name,
-                          fabricUsed: finalUsage,
-                          cost: estimatedMaterialCost,
-                        );
-
-                        // 使用 Provider 新增或更新
-                        if (existingItem != null && index != null) {
-                          context.read<CartProvider>().updateItem(index, newItem);
-                        } else {
-                          context.read<CartProvider>().addItem(newItem);
-                        }
-                        
-                        Navigator.pop(context);
-                      },
-                child: Text(existingItem != null ? 'Save' : 'Add'),
-              ),
-            ],
-          );
-        },
+      builder: (context) => OrderItemDialog(
+        existingItem: existingItem,
+        index: index,
       ),
     );
   }
@@ -1125,7 +801,7 @@ class _POSPageState extends State<POSPage> {
                         ),
                         const SizedBox(height: 24),
                         ElevatedButton.icon(
-                          onPressed: () => _showItemDialog(),
+                          onPressed: () => _openItemDialog(),
                           icon: const Icon(Icons.add),
                           label: const Text('Add First Item'),
                           style: ElevatedButton.styleFrom(
@@ -1199,7 +875,7 @@ class _POSPageState extends State<POSPage> {
                             IconButton(
                               icon: const Icon(Icons.edit, color: Colors.blue),
                               tooltip: 'Edit Item',
-                              onPressed: () => _showItemDialog(
+                              onPressed: () => _openItemDialog(
                                 existingItem: item,
                                 index: index,
                               ),
@@ -1218,7 +894,7 @@ class _POSPageState extends State<POSPage> {
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed: () => _showItemDialog(),
+                      onPressed: () => _openItemDialog(),
                       icon: const Icon(Icons.add),
                       label: const Text('Add Item'),
                     ),
