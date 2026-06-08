@@ -1,13 +1,11 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 import '../components/icon_text.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../l10n/app_localizations.dart';
 import '../models/material_item.dart';
+import '../services/ai_fabric_scan_service.dart';
 import '../services/database_service.dart';
 
 class FabricPage extends StatefulWidget {
@@ -20,6 +18,7 @@ class FabricPage extends StatefulWidget {
 class _FabricPageState extends State<FabricPage>
     with SingleTickerProviderStateMixin {
   final DatabaseService _dbService = DatabaseService();
+  final AiFabricScanService _aiFabricScanService = AiFabricScanService();
 
   final List<String> _categories = ['All', 'Cotton', 'Linen', 'Wool', 'Other'];
 
@@ -48,6 +47,7 @@ class _FabricPageState extends State<FabricPage>
   void dispose() {
     _tabController.dispose();
     _searchController.dispose();
+    _aiFabricScanService.close();
     super.dispose();
   }
 
@@ -103,99 +103,30 @@ class _FabricPageState extends State<FabricPage>
           Future<void> runAiScan(Uint8List imageBytes, String mimeType) async {
             setDialogState(() => _isAiScanning = true);
             try {
-              final user = FirebaseAuth.instance.currentUser;
-              if (user == null) {
-                throw Exception('請先登入後再使用 AI 辨識。');
-              }
-
-              final idToken = await user.getIdToken();
-              if (idToken == null || idToken.isEmpty) {
-                throw Exception('無法取得登入驗證，請重新登入。');
-              }
-              final base64Image = base64Encode(imageBytes);
-              final url = Uri.parse(
-                'https://geminiproxy-iv4r7rb3ja-uc.a.run.app',
+              final result = await _aiFabricScanService.scanFabricLabel(
+                imageBytes: imageBytes,
+                mimeType: mimeType,
               );
-              final body = json.encode({
-                'contents': [
-                  {
-                    'parts': [
-                      {
-                        'text': '''
-你是一個專業的裁縫店庫存助手。
-請讀取這張布料標籤照片，並只以 JSON 格式回傳以下資訊：
-{
-  "name": "品牌名稱加上色號或成分，例如 VBC AR2267 31 Blue",
-  "category": "依據成分猜測分類，只能填 Cotton, Linen, Wool, 或 Other",
-  "color": "布料顏色，例如 NAVY BLUE、DARK GREY、IVORY，用英文大寫"
-}
-注意：不要回傳任何 JSON 以外的文字說明。如果看不清楚，請回傳空字串。''',
-                      },
-                      {
-                        'inlineData': {
-                          'mimeType': mimeType,
-                          'data': base64Image,
-                        },
-                      },
-                    ],
-                  },
-                ],
+
+              setDialogState(() {
+                if (result.name.isNotEmpty && nameController.text.isEmpty) {
+                  nameController.text = result.name;
+                }
+                if (_categories.contains(result.category)) {
+                  selectedCategory = result.category;
+                }
+                if (result.color.isNotEmpty && colorController.text.isEmpty) {
+                  colorController.text = result.color;
+                }
               });
 
-              final response = await http.post(
-                url,
-                headers: {
-                  'Authorization': 'Bearer $idToken',
-                  'Content-Type': 'application/json',
-                },
-                body: body,
-              );
-
-              if (response.statusCode != 200) {
-                throw Exception(
-                  'API 錯誤 ${response.statusCode}: ${response.body}',
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('✨ AI 已自動填入標籤資訊！'),
+                    backgroundColor: Colors.green,
+                  ),
                 );
-              }
-
-              final jsonResponse = json.decode(response.body);
-              final text =
-                  jsonResponse['candidates']?[0]?['content']?['parts']?[0]?['text']
-                      as String?;
-
-              if (text != null) {
-                final cleanJson = text
-                    .replaceAll('```json', '')
-                    .replaceAll('```', '')
-                    .trim();
-                final Map<String, dynamic> data = json.decode(cleanJson);
-
-                setDialogState(() {
-                  if (data['name'] != null &&
-                      data['name'].toString().isNotEmpty &&
-                      nameController.text.isEmpty) {
-                    nameController.text = data['name'];
-                  }
-                  if (data['category'] != null &&
-                      _categories.contains(data['category'])) {
-                    selectedCategory = data['category'];
-                  }
-                  if (data['color'] != null &&
-                      data['color'].toString().isNotEmpty &&
-                      colorController.text.isEmpty) {
-                    colorController.text = data['color']
-                        .toString()
-                        .toUpperCase();
-                  }
-                });
-
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('✨ AI 已自動填入標籤資訊！'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                }
               }
             } catch (e) {
               debugPrint('AI Scan Error: $e');

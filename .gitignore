@@ -3,6 +3,9 @@
 *.log
 *.pyc
 *.swp
+
+# Secret config files (API keys)
+lib/config/ai_config.dart
 .DS_Store
 .atom/
 .build/
@@ -27,11 +30,13 @@ migrate_working_dir/
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
+.firebase/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
 /build/
 /coverage/
+functions/node_modules/
 
 # Symbolication related
 app.*.symbols
