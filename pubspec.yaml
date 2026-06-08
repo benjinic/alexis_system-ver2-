@@ -30,6 +30,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -40,7 +42,7 @@ dependencies:
   cloud_firestore: ^6.1.0
   firebase_auth: ^6.1.2
   firebase_storage: ^13.0.4
-  image_picker: ^1.0.7
+  image_picker: ^1.2.2
   url_launcher: ^6.2.0
   shared_preferences: ^2.3.2
   pdf: ^3.10.4      # PDF 生成核心
@@ -49,7 +51,9 @@ dependencies:
   csv: ^6.0.0            # 用於生成 CSV 格式
   path_provider: ^2.1.2  # 用於存取手機暫存目錄
   share_plus: ^10.0.0    # 用於分享檔案
-  universal_html: ^2.2.4 # [新增] 用於支援 Web 平台的檔案下載
+  universal_html: ^2.3.0 # [新增] 用於支援 Web 平台的檔案下載
+  google_generative_ai: ^0.4.7
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:
@@ -67,11 +71,17 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
-
-  # The following line ensures that the Material Icons font is
-  # included with your application, so that you can use the icons in
-  # the material Icons class.
   uses-material-design: true
+
+  # Use an explicit MaterialIcons font to avoid depending on a corrupted
+  # Flutter SDK cached icon font.
+  fonts:
+    - family: MaterialIcons
+      fonts:
+        - asset: assets/fonts/MaterialIcons-Regular.ttf
+    - family: NotoSansTC
+      fonts:
+        - asset: assets/fonts/NotoSansTC-Variable.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:
