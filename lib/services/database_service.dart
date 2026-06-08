@@ -4,8 +4,9 @@ import '../models/material_item.dart';
 import '../models/workshop_order.dart';
 import '../models/customer.dart';
 import '../models/service_item.dart';
+import 'database_service_interface.dart';
 
-class DatabaseService {
+class DatabaseService implements DatabaseServiceInterface {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final CollectionReference _ordersRef = FirebaseFirestore.instance.collection(
     'orders',
@@ -613,6 +614,7 @@ class DatabaseService {
   // === 6. Services (服務項目) ===
 
   // 取得所有服務項目 (Stream)
+  @override
   Stream<List<ServiceItem>> getServicesStream() {
     return _servicesRef.orderBy('name').snapshots().map((snapshot) {
       return snapshot.docs.map((doc) {

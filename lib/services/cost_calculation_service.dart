@@ -1,6 +1,6 @@
 import '../models/order.dart';
 import '../models/service_item.dart';
-import 'database_service.dart';
+import 'database_service_interface.dart';
 
 class CostCalculationService {
   static double _resolveUnitPrice(
@@ -50,10 +50,10 @@ class CostCalculationService {
 
   static Future<double> calculateSubtotalFromItemsAsync(
     List<OrderItem> items,
-    DatabaseService dbService,
+    ServiceCatalogDataSource dataSource,
   ) async {
     if (items.isEmpty) return 0;
-    final services = await dbService.getServicesStream().first;
+    final services = await dataSource.getServicesStream().first;
     final serviceByName = {
       for (final service in services) service.name: service,
     };
@@ -135,9 +135,9 @@ class CostCalculationService {
   // 直接從 Firebase 讀取服務數據
   static Future<double> calculateItemOutsourcingCostAsync(
     OrderItem item,
-    DatabaseService dbService,
+    ServiceCatalogDataSource dataSource,
   ) async {
-    final services = await dbService.getServicesStream().first;
+    final services = await dataSource.getServicesStream().first;
     final serviceByName = {for (var service in services) service.name: service};
 
     return calculateItemOutsourcingCost(item, serviceByName: serviceByName);
@@ -146,11 +146,11 @@ class CostCalculationService {
   // 計算多個商品的外包成本
   static Future<double> calculateOutsourcingCostFromItemsAsync(
     List<OrderItem> items,
-    DatabaseService dbService,
+    ServiceCatalogDataSource dataSource,
   ) async {
     if (items.isEmpty) return 0;
 
-    final services = await dbService.getServicesStream().first;
+    final services = await dataSource.getServicesStream().first;
     final serviceByName = {for (var service in services) service.name: service};
 
     return calculateOutsourcingCostFromItems(
@@ -162,13 +162,13 @@ class CostCalculationService {
   // 解析訂單的外包成本
   static Future<double> resolveOutsourcingCostForOrderAsync(
     Order order,
-    DatabaseService dbService,
+    ServiceCatalogDataSource dataSource,
   ) async {
     if (order.items.isEmpty) {
       return order.outsourcingCost;
     }
 
-    return calculateOutsourcingCostFromItemsAsync(order.items, dbService);
+    return calculateOutsourcingCostFromItemsAsync(order.items, dataSource);
   }
 
   // 計算總成本

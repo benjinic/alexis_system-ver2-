@@ -1,6 +1,7 @@
 import 'package:alexis_system/models/order.dart';
 import 'package:alexis_system/models/service_item.dart';
 import 'package:alexis_system/services/cost_calculation_service.dart';
+import 'package:alexis_system/services/database_service_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -89,6 +90,53 @@ void main() {
       );
     });
 
+    test(
+      'async calculations can use a fake service catalog data source',
+      () async {
+        final dataSource = _FakeServiceCatalogDataSource([
+          _service(name: 'Suit', price: 3200, outsourcingCost: 900),
+          _service(name: 'Shirt', price: 850, outsourcingCost: 200),
+        ]);
+        final items = [
+          _item(service: 'Suit', price: 2800, quantity: 1),
+          _item(service: 'Shirt', price: 800, quantity: 2),
+        ];
+
+        await expectLater(
+          CostCalculationService.calculateSubtotalFromItemsAsync(
+            items,
+            dataSource,
+          ),
+          completion(4900),
+        );
+        await expectLater(
+          CostCalculationService.calculateOutsourcingCostFromItemsAsync(
+            items,
+            dataSource,
+          ),
+          completion(1300),
+        );
+      },
+    );
+
+    test(
+      'async order outsourcing keeps stored value when no items exist',
+      () async {
+        final dataSource = _FakeServiceCatalogDataSource([
+          _service(name: 'Suit', price: 3200, outsourcingCost: 900),
+        ]);
+        final order = _order(items: const [], outsourcingCost: 450);
+
+        await expectLater(
+          CostCalculationService.resolveOutsourcingCostForOrderAsync(
+            order,
+            dataSource,
+          ),
+          completion(450),
+        );
+      },
+    );
+
     test('syncOrderWithServicePrices recalculates totals and profit', () {
       final services = {
         'Suit': _service(name: 'Suit', price: 3000, outsourcingCost: 800),
@@ -144,6 +192,15 @@ void main() {
       expect(synced.balance, 1250);
     });
   });
+}
+
+class _FakeServiceCatalogDataSource implements ServiceCatalogDataSource {
+  _FakeServiceCatalogDataSource(this.services);
+
+  final List<ServiceItem> services;
+
+  @override
+  Stream<List<ServiceItem>> getServicesStream() => Stream.value(services);
 }
 
 ServiceItem _service({
