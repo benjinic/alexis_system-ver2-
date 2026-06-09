@@ -7,10 +7,11 @@ class MaterialItem {
   final double reorderLevel;
   final String? imageUrl;
   final String category;
-  
+
   // === 1. 新增欄位 ===
   final double retailPrice; // 零售價
-  final bool isOnline;      // 是否上架 (Online Status)
+  final bool isOnline; // 是否上架 (Online Status)
+  final String color; // 顏色
 
   MaterialItem({
     required this.id,
@@ -23,7 +24,8 @@ class MaterialItem {
     this.category = 'Other',
     // === 2. 初始化預設值 ===
     this.retailPrice = 0.0,
-    this.isOnline = false, 
+    this.isOnline = false,
+    this.color = '',
   });
 
   factory MaterialItem.fromMap(String id, Map<dynamic, dynamic> map) {
@@ -39,6 +41,7 @@ class MaterialItem {
       // === 3. 讀取新欄位 ===
       retailPrice: (map['retailPrice'] ?? 0).toDouble(),
       isOnline: map['isOnline'] ?? false,
+      color: map['color'] ?? '',
     );
   }
 
@@ -54,6 +57,7 @@ class MaterialItem {
       // === 4. 寫入新欄位 ===
       'retailPrice': retailPrice,
       'isOnline': isOnline,
+      'color': color,
     };
   }
 }

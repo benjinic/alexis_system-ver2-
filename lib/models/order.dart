@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Order {
@@ -6,20 +7,25 @@ class Order {
   final String uniqueId;
   final String customerId;
   final String customerName;
-  
+
   final List<OrderItem> items; // 記憶體中操作用，不存入 orders 集合
-  final String itemSummary;    // 存入 orders 集合，用於列表顯示
-  
+  final String itemSummary; // 存入 orders 集合，用於列表顯示
+  final String fabricSummary; // 存入 orders 集合，布料名稱摘要，用於搜尋
+
   final double subtotal;
   final double discount;
   final double total;
-  
+
   final double deposit;
   final double balancePayment;
   final String? balancePaymentMethod;
   final DateTime? balancePaidDate;
   final double balance;
-  
+
+  final double materialCost;
+  final double laborCost;
+  final double outsourcingCost;
+  final double fixedCost;
   final double totalCost;
   final double totalProfit;
   final String status;
@@ -28,8 +34,9 @@ class Order {
   final DateTime? updatedAt;
 
   // === 新 POS 系統欄位 ===
-  final DateTime? date;         // 新 POS: 訂單日期，與 createdAt 相容
+  final DateTime? date; // 新 POS: 訂單日期，與 createdAt 相容
   final DateTime? deliveryDate; // 新 POS: 交貨日期
+  final bool isFabricOrdered; // 是否已訂購布料
 
   Order({
     required this.id,
@@ -38,6 +45,7 @@ class Order {
     required this.customerName,
     required this.items,
     this.itemSummary = '',
+    this.fabricSummary = '',
     required this.subtotal,
     required this.discount,
     required this.total,
@@ -46,6 +54,10 @@ class Order {
     this.balancePaymentMethod,
     this.balancePaidDate,
     required this.balance,
+    this.materialCost = 0.0,
+    this.laborCost = 0.0,
+    this.outsourcingCost = 0.0,
+    this.fixedCost = 0.0,
     required this.totalCost,
     required this.totalProfit,
     required this.status,
@@ -55,6 +67,7 @@ class Order {
     // 新 POS 欄位
     this.date,
     this.deliveryDate,
+    this.isFabricOrdered = false,
   });
 
   bool get isFullyPaid => balance <= 0;
@@ -81,7 +94,11 @@ class Order {
             final decoded = jsonDecode(map['items']);
             itemsList = (decoded is List) ? decoded : [];
           } catch (parseError) {
-            print("Warning: Corrupted items JSON for order $id, skipping legacy items: $parseError");
+            developer.log(
+              'Warning: Corrupted items JSON for order $id, skipping legacy items: $parseError',
+              name: 'Order',
+              error: parseError,
+            );
             itemsList = [];
           }
         } else {
@@ -91,14 +108,34 @@ class Order {
           try {
             if (item is Map) return OrderItem.fromMap(item);
             if (item is String) return OrderItem.fromMap(jsonDecode(item));
-            return OrderItem(id: '', orderId: id, service: 'Unknown', price: 0, quantity: 0);
+            return OrderItem(
+              id: '',
+              orderId: id,
+              service: 'Unknown',
+              price: 0,
+              quantity: 0,
+            );
           } catch (itemError) {
-            print("Warning: Failed to parse individual item in order $id: $itemError");
-            return OrderItem(id: '', orderId: id, service: 'Unknown', price: 0, quantity: 0);
+            developer.log(
+              'Warning: Failed to parse individual item in order $id: $itemError',
+              name: 'Order',
+              error: itemError,
+            );
+            return OrderItem(
+              id: '',
+              orderId: id,
+              service: 'Unknown',
+              price: 0,
+              quantity: 0,
+            );
           }
         }).toList();
       } catch (e) {
-        print("Error parsing items for order $id: $e");
+        developer.log(
+          'Error parsing items for order $id: $e',
+          name: 'Order',
+          error: e,
+        );
       }
     }
 
@@ -108,9 +145,11 @@ class Order {
       customerId: map['customerId']?.toString() ?? '',
       customerName: map['customerName']?.toString() ?? '',
       items: orderItems,
-      itemSummary: map['itemSummary']?.toString() ?? 
-          (orderItems.isNotEmpty ? '${orderItems.length} items' : ''), 
-      
+      itemSummary:
+          map['itemSummary']?.toString() ??
+          (orderItems.isNotEmpty ? '${orderItems.length} items' : ''),
+      fabricSummary: map['fabricSummary']?.toString() ?? '',
+
       subtotal: _parseDouble(map['subtotal']),
       discount: _parseDouble(map['discount']),
       total: _parseDouble(map['total']),
@@ -118,36 +157,41 @@ class Order {
       balancePayment: _parseDouble(map['balancePayment']),
       balancePaymentMethod: map['balancePaymentMethod']?.toString(),
       balancePaidDate: map['balancePaidDate'] != null
-          ? (map['balancePaidDate'] is Timestamp 
-              ? (map['balancePaidDate'] as Timestamp).toDate() 
-              : DateTime.tryParse(map['balancePaidDate'].toString()))
+          ? (map['balancePaidDate'] is Timestamp
+                ? (map['balancePaidDate'] as Timestamp).toDate()
+                : DateTime.tryParse(map['balancePaidDate'].toString()))
           : null,
       balance: _parseDouble(map['balance']),
+      materialCost: _parseDouble(map['materialCost']),
+      laborCost: _parseDouble(map['laborCost']),
+      outsourcingCost: _parseDouble(map['outsourcingCost']),
+      fixedCost: _parseDouble(map['fixedCost']),
       totalCost: _parseDouble(map['totalCost']),
       totalProfit: _parseDouble(map['totalProfit']),
       status: map['status']?.toString() ?? 'pending',
       paymentMethod: map['paymentMethod']?.toString() ?? 'Cash',
       createdAt: map['createdAt'] != null
-          ? (map['createdAt'] is Timestamp 
-              ? (map['createdAt'] as Timestamp).toDate() 
-              : DateTime.tryParse(map['createdAt'].toString()))
+          ? (map['createdAt'] is Timestamp
+                ? (map['createdAt'] as Timestamp).toDate()
+                : DateTime.tryParse(map['createdAt'].toString()))
           : null,
       updatedAt: map['updatedAt'] != null
-          ? (map['updatedAt'] is Timestamp 
-              ? (map['updatedAt'] as Timestamp).toDate() 
-              : DateTime.tryParse(map['updatedAt'].toString()))
+          ? (map['updatedAt'] is Timestamp
+                ? (map['updatedAt'] as Timestamp).toDate()
+                : DateTime.tryParse(map['updatedAt'].toString()))
           : null,
       // 新 POS 欄位
       date: map['date'] != null
-          ? (map['date'] is Timestamp 
-              ? (map['date'] as Timestamp).toDate() 
-              : DateTime.tryParse(map['date'].toString()))
+          ? (map['date'] is Timestamp
+                ? (map['date'] as Timestamp).toDate()
+                : DateTime.tryParse(map['date'].toString()))
           : null,
       deliveryDate: map['deliveryDate'] != null
-          ? (map['deliveryDate'] is Timestamp 
-              ? (map['deliveryDate'] as Timestamp).toDate() 
-              : DateTime.tryParse(map['deliveryDate'].toString()))
+          ? (map['deliveryDate'] is Timestamp
+                ? (map['deliveryDate'] as Timestamp).toDate()
+                : DateTime.tryParse(map['deliveryDate'].toString()))
           : null,
+      isFabricOrdered: map['isFabricOrdered'] == true,
     );
   }
 
@@ -157,6 +201,7 @@ class Order {
       'customerId': customerId,
       'customerName': customerName,
       'itemSummary': itemSummary, // 只存摘要
+      'fabricSummary': fabricSummary,
       // 'items': items... // 不存 Items
       'subtotal': subtotal,
       'discount': discount,
@@ -166,6 +211,10 @@ class Order {
       'balancePaymentMethod': balancePaymentMethod,
       'balancePaidDate': balancePaidDate,
       'balance': balance,
+      'materialCost': materialCost,
+      'laborCost': laborCost,
+      'outsourcingCost': outsourcingCost,
+      'fixedCost': fixedCost,
       'totalCost': totalCost,
       'totalProfit': totalProfit,
       'status': status,
@@ -175,37 +224,66 @@ class Order {
       // 新 POS 欄位
       'date': date,
       'deliveryDate': deliveryDate,
+      'isFabricOrdered': isFabricOrdered,
     };
   }
-  
+
   Order copyWith({
     String? id,
     List<OrderItem>? items,
     String? itemSummary,
+    String? fabricSummary,
+    double? subtotal,
+    double? discount,
+    double? total,
+    double? deposit,
+    double? balancePayment,
+    String? balancePaymentMethod,
+    DateTime? balancePaidDate,
+    double? balance,
+    double? materialCost,
+    double? laborCost,
+    double? outsourcingCost,
+    double? fixedCost,
+    double? totalCost,
+    double? totalProfit,
+    String? status,
+    String? paymentMethod,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    DateTime? date,
+    DateTime? deliveryDate,
+    bool? isFabricOrdered,
   }) {
     return Order(
       id: id ?? this.id,
-      uniqueId: this.uniqueId,
-      customerId: this.customerId,
-      customerName: this.customerName,
+      uniqueId: uniqueId,
+      customerId: customerId,
+      customerName: customerName,
       items: items ?? this.items,
       itemSummary: itemSummary ?? this.itemSummary,
-      subtotal: this.subtotal,
-      discount: this.discount,
-      total: this.total,
-      deposit: this.deposit,
-      balancePayment: this.balancePayment,
-      balancePaymentMethod: this.balancePaymentMethod,
-      balancePaidDate: this.balancePaidDate,
-      balance: this.balance,
-      totalCost: this.totalCost,
-      totalProfit: this.totalProfit,
-      status: this.status,
-      paymentMethod: this.paymentMethod,
-      createdAt: this.createdAt,
-      updatedAt: this.updatedAt,
-      date: this.date,
-      deliveryDate: this.deliveryDate,
+      fabricSummary: fabricSummary ?? this.fabricSummary,
+      subtotal: subtotal ?? this.subtotal,
+      discount: discount ?? this.discount,
+      total: total ?? this.total,
+      deposit: deposit ?? this.deposit,
+      balancePayment: balancePayment ?? this.balancePayment,
+      balancePaymentMethod: balancePaymentMethod ?? this.balancePaymentMethod,
+      balancePaidDate: balancePaidDate ?? this.balancePaidDate,
+      balance: balance ?? this.balance,
+      materialCost: materialCost ?? this.materialCost,
+      laborCost: laborCost ?? this.laborCost,
+      outsourcingCost: outsourcingCost ?? this.outsourcingCost,
+      fixedCost: fixedCost ?? this.fixedCost,
+      totalCost: totalCost ?? this.totalCost,
+      totalProfit: totalProfit ?? this.totalProfit,
+      status: status ?? this.status,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      date: date ?? this.date,
+      deliveryDate: deliveryDate ?? this.deliveryDate,
+      isFabricOrdered: isFabricOrdered ?? this.isFabricOrdered,
     );
   }
 }
@@ -220,12 +298,14 @@ class OrderItem {
   final String? fabricName;
   final double fabricUsed;
   final double cost;
+  final bool isFabricOrdered;
+  final bool manualUnitPrice;
 
   // === 新 POS 系統欄位 ===
-  final String? serviceName;    // 新 POS: 服務名稱，與 service 重複但保留以相容
-  final String? fabricCode;     // 新 POS: 布料代碼，與 fabricId 相容
-  final double fabricCost;      // 新 POS: 布料單位成本
-  final double fabricUsage;     // 新 POS: 布料用量
+  final String? serviceName; // 新 POS: 服務名稱，與 service 重複但保留以相容
+  final String? fabricCode; // 新 POS: 布料代碼，與 fabricId 相容
+  final double fabricCost; // 新 POS: 布料單位成本
+  final double fabricUsage; // 新 POS: 布料用量
 
   OrderItem({
     required this.id,
@@ -237,6 +317,8 @@ class OrderItem {
     this.fabricName,
     this.fabricUsed = 0.0,
     this.cost = 0.0,
+    this.isFabricOrdered = false,
+    this.manualUnitPrice = false,
     // 新 POS 欄位
     this.serviceName,
     this.fabricCode,
@@ -247,18 +329,23 @@ class OrderItem {
   factory OrderItem.fromMap(Map<dynamic, dynamic> map) {
     // Try to get fabricUsed first, then fall back to fabricUsage
     final fabricUsedValue = Order._parseDouble(map['fabricUsed']);
-    final fabricUsageValue = fabricUsedValue != 0.0 ? fabricUsedValue : Order._parseDouble(map['fabricUsage']);
+    final fabricUsageValue = fabricUsedValue != 0.0
+        ? fabricUsedValue
+        : Order._parseDouble(map['fabricUsage']);
 
     return OrderItem(
       id: map['id']?.toString() ?? '',
       orderId: map['orderId']?.toString() ?? '',
-      service: map['service']?.toString() ?? map['serviceName']?.toString() ?? '',
+      service:
+          map['service']?.toString() ?? map['serviceName']?.toString() ?? '',
       price: Order._parseDouble(map['price']),
       quantity: int.tryParse(map['quantity']?.toString() ?? '1') ?? 1,
       fabricId: map['fabricId']?.toString() ?? map['fabricCode']?.toString(),
       fabricName: map['fabricName']?.toString(),
       fabricUsed: fabricUsageValue,
       cost: Order._parseDouble(map['cost']),
+      isFabricOrdered: map['isFabricOrdered'] == true,
+      manualUnitPrice: map['manualUnitPrice'] == true,
       // 新 POS 欄位
       serviceName: map['serviceName']?.toString(),
       fabricCode: map['fabricCode']?.toString(),
@@ -278,11 +365,49 @@ class OrderItem {
       'fabricName': fabricName,
       'fabricUsed': fabricUsed,
       'cost': cost,
+      'isFabricOrdered': isFabricOrdered,
+      'manualUnitPrice': manualUnitPrice,
       // 新 POS 欄位
       'serviceName': serviceName,
       'fabricCode': fabricCode,
       'fabricCost': fabricCost,
       'fabricUsage': fabricUsage,
     };
+  }
+
+  OrderItem copyWith({
+    String? id,
+    String? orderId,
+    String? service,
+    double? price,
+    int? quantity,
+    String? fabricId,
+    String? fabricName,
+    double? fabricUsed,
+    double? cost,
+    bool? isFabricOrdered,
+    bool? manualUnitPrice,
+    String? serviceName,
+    String? fabricCode,
+    double? fabricCost,
+    double? fabricUsage,
+  }) {
+    return OrderItem(
+      id: id ?? this.id,
+      orderId: orderId ?? this.orderId,
+      service: service ?? this.service,
+      price: price ?? this.price,
+      quantity: quantity ?? this.quantity,
+      fabricId: fabricId ?? this.fabricId,
+      fabricName: fabricName ?? this.fabricName,
+      fabricUsed: fabricUsed ?? this.fabricUsed,
+      cost: cost ?? this.cost,
+      isFabricOrdered: isFabricOrdered ?? this.isFabricOrdered,
+      manualUnitPrice: manualUnitPrice ?? this.manualUnitPrice,
+      serviceName: serviceName ?? this.serviceName,
+      fabricCode: fabricCode ?? this.fabricCode,
+      fabricCost: fabricCost ?? this.fabricCost,
+      fabricUsage: fabricUsage ?? this.fabricUsage,
+    );
   }
 }
