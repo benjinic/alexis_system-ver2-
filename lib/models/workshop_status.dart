@@ -25,4 +25,19 @@ enum WorkshopStatus {
         return 'Archived';
     }
   }
+
+  WorkshopStatus? get next {
+    switch (this) {
+      case WorkshopStatus.measuring:
+        return WorkshopStatus.cutting;
+      case WorkshopStatus.cutting:
+        return WorkshopStatus.sewing;
+      case WorkshopStatus.sewing:
+        return WorkshopStatus.finishing;
+      case WorkshopStatus.finishing:
+        return WorkshopStatus.completed;
+      default:
+        return null;
+    }
+  }
 }

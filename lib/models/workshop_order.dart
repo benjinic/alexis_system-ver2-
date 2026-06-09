@@ -11,6 +11,7 @@ class WorkshopOrder {
   final DateTime dueDate;
   final int progress;
   final String notes;
+  final bool isFabricOrdered;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -24,6 +25,7 @@ class WorkshopOrder {
     required this.dueDate,
     required this.progress,
     this.notes = '',
+    this.isFabricOrdered = false,
     this.createdAt,
     this.updatedAt,
   });
@@ -60,6 +62,7 @@ class WorkshopOrder {
       dueDate: _parseDate(map['dueDate']),
       progress: map['progress']?.toInt() ?? 0,
       notes: map['notes'] ?? '',
+      isFabricOrdered: map['isFabricOrdered'] == true,
       createdAt: _parseNullableDate(map['createdAt']),
       updatedAt: _parseNullableDate(map['updatedAt']),
     );
@@ -76,6 +79,7 @@ class WorkshopOrder {
       'dueDate': dueDate.millisecondsSinceEpoch,
       'progress': progress,
       'notes': notes,
+      'isFabricOrdered': isFabricOrdered,
       'createdAt':
           createdAt?.millisecondsSinceEpoch ??
           DateTime.now().millisecondsSinceEpoch,
@@ -122,6 +126,7 @@ class WorkshopOrder {
     DateTime? dueDate,
     int? progress,
     String? notes,
+    bool? isFabricOrdered,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -135,6 +140,7 @@ class WorkshopOrder {
       dueDate: dueDate ?? this.dueDate,
       progress: progress ?? this.progress,
       notes: notes ?? this.notes,
+      isFabricOrdered: isFabricOrdered ?? this.isFabricOrdered,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
