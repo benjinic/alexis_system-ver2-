@@ -1,4 +1,7 @@
+import 'dart:developer' as developer;
+
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
+import 'package:firebase_storage/firebase_storage.dart';
 import '../models/order.dart';
 import '../models/material_item.dart';
 import '../models/workshop_order.dart';
@@ -7,6 +10,17 @@ import '../models/service_item.dart';
 import 'database_service_interface.dart';
 
 class DatabaseService implements DatabaseServiceInterface {
+  static const String _logName = 'DatabaseService';
+
+  void _log(String message, {Object? error, StackTrace? stackTrace}) {
+    developer.log(
+      message,
+      name: _logName,
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
+
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final CollectionReference _ordersRef = FirebaseFirestore.instance.collection(
     'orders',
@@ -21,6 +35,8 @@ class DatabaseService implements DatabaseServiceInterface {
       .collection('customers');
   final CollectionReference _servicesRef = FirebaseFirestore.instance
       .collection('services');
+  final CollectionReference _orderImagesRef = FirebaseFirestore.instance
+      .collection('order_images');
 
   // === 1. Orders (訂單) ===
 
@@ -67,8 +83,7 @@ class DatabaseService implements DatabaseServiceInterface {
   // 新增：取得特定時間範圍的訂單 (專門給 Dashboard 營收卡片使用)
   Stream<List<Order>> getOrdersByDateRangeStream(DateTime start, DateTime end) {
     // 除錯：列出查詢範圍
-    // ignore: avoid_print
-    print('DEBUG: Querying orders between ' + start.toString() + ' and ' + end.toString());
+    _log('DEBUG: Querying orders between $start and $end');
 
     return _ordersRef
         .orderBy('createdAt', descending: true)
@@ -77,19 +92,17 @@ class DatabaseService implements DatabaseServiceInterface {
         .snapshots()
         .map((snapshot) {
           // 除錯：回傳筆數
-          // ignore: avoid_print
-          print('DEBUG: Found ' + snapshot.docs.length.toString() + ' documents');
+          _log('DEBUG: Found ${snapshot.docs.length} documents');
 
           return snapshot.docs.map((doc) {
             try {
               return Order.fromMap(doc.id, doc.data() as Map<dynamic, dynamic>);
             } catch (e) {
               // 捕捉單筆解析錯誤，避免整個串流中斷
-              // ignore: avoid_print
-              print('DEBUG: Error parsing order ' + doc.id + ': ' + e.toString());
+              _log('DEBUG: Error parsing order ${doc.id}: $e', error: e);
               // 回傳一筆標記為錯誤的占位資料，方便在 UI 上辨識
               return Order(
-                id: 'error-' + doc.id,
+                id: 'error-${doc.id}',
                 uniqueId: '',
                 customerId: '',
                 customerName: 'Error Data',
@@ -115,9 +128,11 @@ class DatabaseService implements DatabaseServiceInterface {
 
   // === 新增：取得特定「尾款付款日期」範圍的訂單 (計算現金流用) ===
   // 注意：`where(balancePaidDate)` 與 `orderBy(balancePaidDate)` 可能需要在 Firestore 建立複合索引。
-  Stream<List<Order>> getOrdersByBalanceDateStream(DateTime start, DateTime end) {
-    // ignore: avoid_print
-    print('DEBUG: Querying orders by balancePaidDate between ' + start.toString() + ' and ' + end.toString());
+  Stream<List<Order>> getOrdersByBalanceDateStream(
+    DateTime start,
+    DateTime end,
+  ) {
+    _log('DEBUG: Querying orders by balancePaidDate between $start and $end');
 
     return _ordersRef
         .orderBy('balancePaidDate', descending: true)
@@ -125,18 +140,21 @@ class DatabaseService implements DatabaseServiceInterface {
         .where('balancePaidDate', isLessThanOrEqualTo: end)
         .snapshots()
         .map((snapshot) {
-          // ignore: avoid_print
-          print('DEBUG: Found ' + snapshot.docs.length.toString() + ' documents (balancePaidDate)');
+          _log(
+            'DEBUG: Found ${snapshot.docs.length} documents (balancePaidDate)',
+          );
 
           return snapshot.docs.map((doc) {
             try {
               return Order.fromMap(doc.id, doc.data() as Map<dynamic, dynamic>);
             } catch (e) {
-              // ignore: avoid_print
-              print('DEBUG: Error parsing order ' + doc.id + ' in balance query: ' + e.toString());
+              _log(
+                'DEBUG: Error parsing order ${doc.id} in balance query: $e',
+                error: e,
+              );
               // 回傳空訂單避免當機 (僅供除錯)
               return Order(
-                id: 'error-' + doc.id,
+                id: 'error-${doc.id}',
                 uniqueId: '',
                 customerId: '',
                 customerName: 'Error',
@@ -173,7 +191,7 @@ class DatabaseService implements DatabaseServiceInterface {
         return Order.fromMap(doc.id, doc.data() as Map<dynamic, dynamic>);
       }).toList();
     } catch (e) {
-      print('Error fetching orders once: $e');
+      _log('Error fetching orders once: $e', error: e);
       return [];
     }
   }
@@ -189,7 +207,7 @@ class DatabaseService implements DatabaseServiceInterface {
         return OrderItem.fromMap(doc.data() as Map<String, dynamic>);
       }).toList();
     } catch (e) {
-      print("Error fetching items for order $orderId: $e");
+      _log('Error fetching items for order $orderId: $e', error: e);
       return [];
     }
   }
@@ -208,9 +226,13 @@ class DatabaseService implements DatabaseServiceInterface {
       DocumentSnapshot counterSnapshot;
       try {
         counterSnapshot = await transaction.get(counterRef);
-      } catch (e) {
-        print("Notice: Counter read failed, using default.");
-        throw e;
+      } catch (e, stackTrace) {
+        _log(
+          'Notice: Counter read failed, using default.',
+          error: e,
+          stackTrace: stackTrace,
+        );
+        rethrow;
       }
 
       DocumentSnapshot? customerSnapshot;
@@ -218,7 +240,7 @@ class DatabaseService implements DatabaseServiceInterface {
         try {
           customerSnapshot = await transaction.get(customerRef);
         } catch (e) {
-          print("Warning: Failed to read customer data: $e");
+          _log('Warning: Failed to read customer data: $e', error: e);
         }
       }
 
@@ -253,6 +275,11 @@ class DatabaseService implements DatabaseServiceInterface {
 
       String summary = order.items.map((i) => i.service).join(', ');
       if (summary.length > 50) summary = '${summary.substring(0, 47)}...';
+      final fabricNames = order.items
+          .map((i) => i.fabricName ?? '')
+          .where((n) => n.isNotEmpty)
+          .toSet()
+          .join(', ');
 
       // === 3. 寫入階段 ===
 
@@ -265,6 +292,7 @@ class DatabaseService implements DatabaseServiceInterface {
 
       Map<String, dynamic> orderData = order.toJson();
       orderData['itemSummary'] = summary;
+      orderData['fabricSummary'] = fabricNames;
       orderData.remove('items'); // 移除 items 陣列
 
       transaction.set(newOrderRef, orderData);
@@ -324,6 +352,11 @@ class DatabaseService implements DatabaseServiceInterface {
       String summary = order.items.map((i) => i.service).join(', ');
       if (summary.length > 50) summary = '${summary.substring(0, 47)}...';
       orderData['itemSummary'] = summary;
+      orderData['fabricSummary'] = order.items
+          .map((i) => i.fabricName ?? '')
+          .where((n) => n.isNotEmpty)
+          .toSet()
+          .join(', ');
 
       // 移除 items 陣列 (因為主檔不存細項，這是正規化設計)
       orderData.remove('items');
@@ -361,10 +394,102 @@ class DatabaseService implements DatabaseServiceInterface {
 
       // 3. 提交所有變更
       await batch.commit();
-    } catch (e) {
-      print("Error updating order: $e");
-      throw e; // 拋出錯誤讓 UI 層顯示 SnackBar
+    } catch (e, stackTrace) {
+      _log('Error updating order: $e', error: e, stackTrace: stackTrace);
+      rethrow; // 拋出錯誤讓 UI 層顯示 SnackBar
     }
+  }
+
+  // 只更新訂單主檔的布料下單狀態，避免重建 order_items。
+  Future<void> updateOrderFabricStatus({
+    required String orderId,
+    required bool isFabricOrdered,
+  }) async {
+    await _ordersRef.doc(orderId).update({
+      'isFabricOrdered': isFabricOrdered,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // 只更新訂單成本拆解中的 Material / Outsourcing，並同步重算總成本與利潤。
+  Future<void> updateOrderCostBreakdown({
+    required String orderId,
+    required double materialCost,
+    required double outsourcingCost,
+  }) async {
+    if (materialCost < 0 || outsourcingCost < 0) {
+      throw Exception('Cost values cannot be negative.');
+    }
+
+    final orderRef = _ordersRef.doc(orderId);
+    final snapshot = await orderRef.get();
+    if (!snapshot.exists || snapshot.data() == null) {
+      throw Exception('Order not found.');
+    }
+
+    final data = snapshot.data() as Map<String, dynamic>;
+    final fixedCost = (data['fixedCost'] as num?)?.toDouble() ?? 0.0;
+    final totalRevenue = (data['total'] as num?)?.toDouble() ?? 0.0;
+
+    final totalCost = materialCost + outsourcingCost + fixedCost;
+    final totalProfit = totalRevenue - totalCost;
+
+    await orderRef.update({
+      'materialCost': materialCost,
+      'outsourcingCost': outsourcingCost,
+      'totalCost': totalCost,
+      'totalProfit': totalProfit,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // 更新單一訂單細項的訂料狀態，並同步主訂單聚合狀態。
+  Future<void> updateOrderItemFabricStatus({
+    required String orderId,
+    required String itemId,
+    required bool isFabricOrdered,
+  }) async {
+    final itemSnapshot = await _orderItemsRef
+        .where('orderId', isEqualTo: orderId)
+        .where('id', isEqualTo: itemId)
+        .limit(1)
+        .get();
+
+    if (itemSnapshot.docs.isEmpty) {
+      throw Exception('Order item not found for update');
+    }
+
+    await itemSnapshot.docs.first.reference.update({
+      'isFabricOrdered': isFabricOrdered,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    final orderItemsSnapshot = await _orderItemsRef
+        .where('orderId', isEqualTo: orderId)
+        .get();
+
+    final itemMaps = orderItemsSnapshot.docs
+        .map((doc) => doc.data() as Map<String, dynamic>)
+        .toList();
+
+    final fabricRequiredItems = itemMaps.where((item) {
+      final fabricId = item['fabricId']?.toString().trim() ?? '';
+      final fabricName = item['fabricName']?.toString().trim() ?? '';
+      final fabricUsed =
+          (item['fabricUsed'] as num?)?.toDouble() ??
+          (item['fabricUsage'] as num?)?.toDouble() ??
+          0;
+      return fabricId.isNotEmpty || fabricName.isNotEmpty || fabricUsed > 0;
+    }).toList();
+
+    final allFabricOrdered =
+        fabricRequiredItems.isNotEmpty &&
+        fabricRequiredItems.every((item) => item['isFabricOrdered'] == true);
+
+    await _ordersRef.doc(orderId).update({
+      'isFabricOrdered': allFabricOrdered,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   // Optimized delete order: updates customer stats and cleans up items atomically
@@ -408,9 +533,9 @@ class DatabaseService implements DatabaseServiceInterface {
 
       // 5. Commit all changes atomically
       await batch.commit();
-    } catch (e) {
-      print("Error deleting order: $e");
-      throw e; // Re-throw for UI layer error handling
+    } catch (e, stackTrace) {
+      _log('Error deleting order: $e', error: e, stackTrace: stackTrace);
+      rethrow; // Re-throw for UI layer error handling
     }
   }
 
@@ -469,6 +594,23 @@ class DatabaseService implements DatabaseServiceInterface {
     return getInventoryStream();
   }
 
+  // 根據 ID 取得單一布料資訊 (供訂單詳情顯示圖片使用)
+  Future<MaterialItem?> getMaterialById(String materialId) async {
+    if (materialId.isEmpty) return null;
+    try {
+      final doc = await _inventoryRef.doc(materialId).get();
+      if (doc.exists) {
+        return MaterialItem.fromMap(
+          doc.id,
+          doc.data() as Map<dynamic, dynamic>,
+        );
+      }
+    } catch (e) {
+      _log('Error fetching material $materialId: $e', error: e);
+    }
+    return null;
+  }
+
   // === 3. Workshop Orders (工場單) ===
 
   // 優化：增加 isOnGoingOnly 參數
@@ -500,6 +642,22 @@ class DatabaseService implements DatabaseServiceInterface {
     await _workshopRef.add(order.toJson());
   }
 
+  // 批量更新同一訂單下所有 workshop_orders 的布料狀態
+  Future<void> updateWorkshopOrdersFabricStatus({
+    required String orderId,
+    required bool isFabricOrdered,
+  }) async {
+    final snapshot = await _workshopRef
+        .where('orderId', isEqualTo: orderId)
+        .get();
+    if (snapshot.docs.isEmpty) return;
+    final batch = _firestore.batch();
+    for (final doc in snapshot.docs) {
+      batch.update(doc.reference, {'isFabricOrdered': isFabricOrdered});
+    }
+    await batch.commit();
+  }
+
   Future<void> updateWorkshopOrderStatus(String id, String status) async {
     await _workshopRef.doc(id).update({'status': status});
   }
@@ -523,6 +681,15 @@ class DatabaseService implements DatabaseServiceInterface {
   }
 
   // === 4. Customers (客戶) ===
+
+  Future<List<Customer>> getCustomersOnce() async {
+    final snapshot = await _customersRef.orderBy('name').get();
+    return snapshot.docs
+        .map(
+          (doc) => Customer.fromMap(doc.id, doc.data() as Map<String, dynamic>),
+        )
+        .toList();
+  }
 
   Stream<List<Customer>> getCustomersStream() {
     return _customersRef.orderBy('name').snapshots().map((snapshot) {
@@ -548,16 +715,16 @@ class DatabaseService implements DatabaseServiceInterface {
         .limit(limit) // 只抓取前 10 筆
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        return Customer.fromMap(doc.id, doc.data() as Map<String, dynamic>);
-      }).toList();
-    });
+          return snapshot.docs.map((doc) {
+            return Customer.fromMap(doc.id, doc.data() as Map<String, dynamic>);
+          }).toList();
+        });
   }
 
   // === 新增：根據一組 ID 取得特定客戶列表 (用於 Top 10 顯示) ===
   Stream<List<Customer>> getCustomersByIds(List<String> ids) {
     if (ids.isEmpty) return Stream.value([]);
-    
+
     // Firestore whereIn 最多支援 10 個元素，剛好符合 Top 10 需求
     // 如果 id 超過 10 個，這裡只取前 10 個以避免報錯
     final targetIds = ids.length > 10 ? ids.sublist(0, 10) : ids;
@@ -566,10 +733,10 @@ class DatabaseService implements DatabaseServiceInterface {
         .where(FieldPath.documentId, whereIn: targetIds)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        return Customer.fromMap(doc.id, doc.data() as Map<String, dynamic>);
-      }).toList();
-    });
+          return snapshot.docs.map((doc) {
+            return Customer.fromMap(doc.id, doc.data() as Map<String, dynamic>);
+          }).toList();
+        });
   }
 
   Future<String> addCustomer(Customer customer) async {
@@ -625,23 +792,101 @@ class DatabaseService implements DatabaseServiceInterface {
   }
 
   // 新增服務項目
-  Future<void> addService(ServiceItem service) async {
-    await _servicesRef.add({
+  Future<String> addService(ServiceItem service) async {
+    final docRef = await _servicesRef.add({
       'name': service.name,
       'price': service.price,
       'defaultFabricUsage': service.defaultFabricUsage,
       'durationDays': service.durationDays,
+      'outsourcingCost': service.outsourcingCost,
     });
+    return docRef.id;
+  }
+
+  // 依文件 ID 讀取單一服務項目
+  Future<ServiceItem?> getServiceById(String serviceId) async {
+    if (serviceId.trim().isEmpty) return null;
+
+    final doc = await _servicesRef.doc(serviceId).get();
+    if (!doc.exists || doc.data() == null) {
+      return null;
+    }
+
+    final data = doc.data() as Map<String, dynamic>;
+    return ServiceItem.fromMap({...data, 'id': doc.id});
   }
 
   // 更新服務項目
   Future<void> updateService(ServiceItem service) async {
+    if (service.id.trim().isEmpty) {
+      throw Exception('Service document ID is missing. Update aborted.');
+    }
+
     await _servicesRef.doc(service.id).update({
       'name': service.name,
       'price': service.price,
       'defaultFabricUsage': service.defaultFabricUsage,
       'durationDays': service.durationDays,
+      'outsourcingCost': service.outsourcingCost,
     });
+  }
+
+  // Fill missing outsourcing costs with known defaults.
+  // Do not overwrite user-managed values.
+  Future<void> ensureMinimumServiceOutsourcingCosts({
+    required Map<String, double> minimumCostByService,
+  }) async {
+    if (minimumCostByService.isEmpty) return;
+
+    for (final entry in minimumCostByService.entries) {
+      final serviceName = entry.key;
+      final minimumCost = entry.value;
+      final normalizedName = serviceName.trim().toLowerCase();
+      if (normalizedName.isEmpty || minimumCost < 0) {
+        continue;
+      }
+
+      final snapshot = await _servicesRef
+          .where('name', isEqualTo: serviceName)
+          .limit(10)
+          .get();
+
+      if (snapshot.docs.isEmpty) {
+        final fallbackSnapshot = await _servicesRef.limit(200).get();
+        final normalizedDocs = fallbackSnapshot.docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final rawName = data['name']?.toString().trim().toLowerCase() ?? '';
+          return rawName == normalizedName;
+        }).toList();
+
+        for (final doc in normalizedDocs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final hasValue = data['outsourcingCost'] != null;
+          if (!hasValue) {
+            await doc.reference.update({'outsourcingCost': minimumCost});
+          }
+        }
+        continue;
+      }
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final hasValue = data['outsourcingCost'] != null;
+        if (!hasValue) {
+          await doc.reference.update({'outsourcingCost': minimumCost});
+        }
+      }
+    }
+  }
+
+  // Backward-compatible wrapper for single-service callers.
+  Future<void> ensureMinimumServiceOutsourcingCost({
+    required String serviceName,
+    required double minimumCost,
+  }) {
+    return ensureMinimumServiceOutsourcingCosts(
+      minimumCostByService: {serviceName: minimumCost},
+    );
   }
 
   // === 6b. Service Stream Aliases (新 POS 系統相容層) ===
@@ -655,61 +900,13 @@ class DatabaseService implements DatabaseServiceInterface {
     await _servicesRef.doc(serviceId).delete();
   }
 
-  // 確保有預設服務資料 (第一次打開時)
-  // Check if default services need to be initialized (seed if empty)
+  // 第一次打開時只讀取 Firebase 既有 service 資料，不再寫入本地硬編碼預設值。
   Future<void> seedDefaultServices() async {
     final snapshot = await _servicesRef.limit(1).get();
     if (snapshot.docs.isEmpty) {
-      print("Seeding default services...");
-      final defaults = [
-        // Set default manufacturing days based on service type
-        {
-          'name': '3-Piece Suit',
-          'price': 1200.0,
-          'defaultFabricUsage': 3.5,
-          'durationDays': 21,
-        },
-        {
-          'name': '2-Piece Suit',
-          'price': 850.0,
-          'defaultFabricUsage': 3.0,
-          'durationDays': 21,
-        },
-        {
-          'name': 'Blazer',
-          'price': 450.0,
-          'defaultFabricUsage': 2.0,
-          'durationDays': 21,
-        }, // Jacket
-        {
-          'name': 'Trousers',
-          'price': 250.0,
-          'defaultFabricUsage': 1.5,
-          'durationDays': 15,
-        },
-        {
-          'name': 'Shirt',
-          'price': 180.0,
-          'defaultFabricUsage': 1.5,
-          'durationDays': 10,
-        },
-        {
-          'name': 'Wedding Dress',
-          'price': 2500.0,
-          'defaultFabricUsage': 5.0,
-          'durationDays': 30,
-        },
-        {
-          'name': 'Alterations',
-          'price': 50.0,
-          'defaultFabricUsage': 0.0,
-          'durationDays': 5,
-        }, // Other
-      ];
-
-      for (var item in defaults) {
-        await _servicesRef.add(item);
-      }
+      _log(
+        'Services collection is empty. Waiting for Firebase service data instead of seeding local defaults.',
+      );
     }
   }
 
@@ -745,7 +942,7 @@ class DatabaseService implements DatabaseServiceInterface {
         .doc('measurements')
         .get();
     if (!doc.exists) {
-      print("Seeding default measurement fields...");
+      _log('Seeding default measurement fields...');
       final defaultFields = [
         'Neck',
         'Shoulder',
@@ -760,6 +957,117 @@ class DatabaseService implements DatabaseServiceInterface {
         'Cuff',
       ];
       await updateMeasurementFields(defaultFields);
+    }
+  }
+
+  // === Data Cleanup: 清除孤立資料 ===
+
+  /// 掃描並清除系統內無用的孤立資料。
+  /// 回傳各類別清除數量的摘要 Map。
+  Future<Map<String, int>> cleanupOrphanedData() async {
+    int deletedOrderItems = 0;
+    int deletedWorkshopOrders = 0;
+
+    // 1. 取得所有有效的訂單 ID
+    final ordersSnapshot = await _ordersRef.get();
+    final validOrderIds = ordersSnapshot.docs.map((d) => d.id).toSet();
+
+    // 2. 清除無對應訂單的 order_items
+    // Firestore whereNotIn 限制每次最多 10 個值，需分批處理
+    final orderItemsSnapshot = await _orderItemsRef.get();
+    final WriteBatch itemBatch = _firestore.batch();
+    int itemBatchCount = 0;
+
+    for (final doc in orderItemsSnapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final String orderId = (data['orderId'] ?? '').toString();
+      if (orderId.isEmpty || !validOrderIds.contains(orderId)) {
+        itemBatch.delete(doc.reference);
+        deletedOrderItems++;
+        itemBatchCount++;
+        // Firestore batch 最多 500 次操作，這裡保守限制 400
+        if (itemBatchCount >= 400) break;
+      }
+    }
+    if (deletedOrderItems > 0) {
+      await itemBatch.commit();
+    }
+
+    // 3. 清除無對應訂單的 workshop_orders
+    final workshopSnapshot = await _workshopRef.get();
+    final WriteBatch wsBatch = _firestore.batch();
+    int wsBatchCount = 0;
+
+    for (final doc in workshopSnapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final String orderId = (data['orderId'] ?? '').toString();
+      // workshop_orders 的 orderId 欄位存的是訂單號 (e.g. "14039")
+      // 若 orderId 非空且在 validOrderIds 中找不到，則視為孤立
+      if (orderId.isNotEmpty && !validOrderIds.contains(orderId)) {
+        wsBatch.delete(doc.reference);
+        deletedWorkshopOrders++;
+        wsBatchCount++;
+        if (wsBatchCount >= 400) break;
+      }
+    }
+    if (deletedWorkshopOrders > 0) {
+      await wsBatch.commit();
+    }
+
+    _log(
+      'Cleanup done: $deletedOrderItems orphaned order_items, '
+      '$deletedWorkshopOrders orphaned workshop_orders deleted.',
+    );
+
+    return {
+      'orderItems': deletedOrderItems,
+      'workshopOrders': deletedWorkshopOrders,
+    };
+  }
+
+  // === Order Images ===
+
+  Stream<List<Map<String, dynamic>>> getOrderImagesStream(String orderId) {
+    return _orderImagesRef
+        .where('orderId', isEqualTo: orderId)
+        .orderBy('uploadedAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map(
+                (doc) => {
+                  'docId': doc.id,
+                  ...doc.data() as Map<String, dynamic>,
+                },
+              )
+              .toList(),
+        );
+  }
+
+  Future<String> addOrderImage({
+    required String orderId,
+    required String imageUrl,
+    required String fileName,
+  }) async {
+    final doc = await _orderImagesRef.add({
+      'orderId': orderId,
+      'imageUrl': imageUrl,
+      'fileName': fileName,
+      'uploadedAt': FieldValue.serverTimestamp(),
+    });
+    return doc.id;
+  }
+
+  Future<void> deleteOrderImage({
+    required String docId,
+    required String storageUrl,
+  }) async {
+    await _orderImagesRef.doc(docId).delete();
+    try {
+      final ref = FirebaseStorage.instance.refFromURL(storageUrl);
+      await ref.delete();
+    } catch (e) {
+      _log('Warning: Could not delete storage file: $e', error: e);
     }
   }
 }
