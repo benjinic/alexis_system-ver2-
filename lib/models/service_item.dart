@@ -4,8 +4,9 @@ class ServiceItem {
   final double price;
   final double defaultFabricUsage;
   final int durationDays; // Manufacturing duration in days
-  final double markupMultiplier; // e.g. Suit: 3.0, Shirt: 2.5
+  final double markupMultiplier; // Legacy field for older pricing logic
   final bool allowModifiers; // Whether to allow modifier selections
+  final double? outsourcingCost; // Explicit per-unit outsourcing cost
 
   ServiceItem({
     required this.id,
@@ -13,12 +14,14 @@ class ServiceItem {
     required this.price,
     required this.defaultFabricUsage,
     this.durationDays = 7, // Default 7 days
-    this.markupMultiplier = 2.5, // Default value
+    this.markupMultiplier = 2.5, // Kept for backward compatibility
     this.allowModifiers = false,
+    this.outsourcingCost,
   });
 
   // Convert from Firestore map
   factory ServiceItem.fromMap(Map<String, dynamic> map) {
+    final rawOutsourcingCost = map['outsourcingCost'];
     return ServiceItem(
       id: map['id'] ?? '',
       name: map['name'] ?? '',
@@ -27,6 +30,9 @@ class ServiceItem {
       durationDays: (map['durationDays'] ?? 7).toInt(),
       markupMultiplier: (map['markupMultiplier'] ?? 2.5).toDouble(),
       allowModifiers: map['allowModifiers'] ?? false,
+      outsourcingCost: rawOutsourcingCost == null
+          ? null
+          : (rawOutsourcingCost as num).toDouble(),
     );
   }
 
@@ -40,6 +46,7 @@ class ServiceItem {
       'durationDays': durationDays,
       'markupMultiplier': markupMultiplier,
       'allowModifiers': allowModifiers,
+      'outsourcingCost': outsourcingCost,
     };
   }
 
@@ -52,6 +59,7 @@ class ServiceItem {
     int? durationDays,
     double? markupMultiplier,
     bool? allowModifiers,
+    double? outsourcingCost,
   }) {
     return ServiceItem(
       id: id ?? this.id,
@@ -61,6 +69,7 @@ class ServiceItem {
       durationDays: durationDays ?? this.durationDays,
       markupMultiplier: markupMultiplier ?? this.markupMultiplier,
       allowModifiers: allowModifiers ?? this.allowModifiers,
+      outsourcingCost: outsourcingCost ?? this.outsourcingCost,
     );
   }
 }
