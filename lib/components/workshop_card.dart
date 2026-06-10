@@ -9,6 +9,7 @@ class WorkshopCard extends StatelessWidget {
   final VoidCallback? onArchive;
   final VoidCallback? onEdit;
   final VoidCallback? onNextStage;
+  final VoidCallback? onFabricToggle;
 
   const WorkshopCard({
     super.key,
@@ -17,6 +18,7 @@ class WorkshopCard extends StatelessWidget {
     this.onArchive,
     this.onEdit,
     this.onNextStage,
+    this.onFabricToggle,
   });
 
   @override
@@ -147,6 +149,55 @@ class WorkshopCard extends StatelessWidget {
                       ),
                     ),
                   ],
+                ),
+
+                const SizedBox(height: 8),
+
+                InkWell(
+                  onTap: onFabricToggle,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: order.isFabricOrdered
+                          ? Colors.green.withOpacity(0.10)
+                          : Colors.orange.withOpacity(0.10),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: order.isFabricOrdered
+                            ? Colors.green.withOpacity(0.35)
+                            : Colors.orange.withOpacity(0.35),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          order.isFabricOrdered
+                              ? Icons.check_circle_outline
+                              : Icons.local_shipping_outlined,
+                          size: 18,
+                          color: order.isFabricOrdered
+                              ? Colors.green[700]
+                              : Colors.orange[800],
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          order.isFabricOrdered ? '布料已訂購' : '布料待訂購',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: order.isFabricOrdered
+                                ? Colors.green[700]
+                                : Colors.orange[800],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
 
                 const SizedBox(height: 20),

@@ -136,6 +136,23 @@ class _WorkshopPageState extends State<WorkshopPage> {
     );
   }
 
+  Future<void> _toggleFabricOrdered(WorkshopOrder order) async {
+    await _dbService.updateWorkshopOrder(
+      order.copyWith(
+        isFabricOrdered: !order.isFabricOrdered,
+        updatedAt: DateTime.now(),
+      ),
+    );
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(order.isFabricOrdered ? '布料標記為未訂購' : '布料已標記為已訂購'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   // === 3. 下拉更新邏輯 ===
   Future<void> _handleRefresh() async {
     // 由於使用 StreamBuilder，其實只要 setState 觸發重建即可
@@ -451,6 +468,7 @@ class _WorkshopPageState extends State<WorkshopPage> {
                                   order.status == WorkshopStatus.completed
                                   ? () => _toggleArchive(order, true)
                                   : null,
+                              onFabricToggle: () => _toggleFabricOrdered(order),
                             ),
                           );
                         },
