@@ -169,6 +169,298 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
     Navigator.pop(context);
   }
 
+  String _buildAutoNumberedFabricName(String baseName) {
+    final normalizedExisting = _fabrics
+        .map((f) => f.name.trim().toLowerCase())
+        .toSet();
+
+    if (!normalizedExisting.contains(baseName.toLowerCase())) {
+      return baseName;
+    }
+
+    var counter = 2;
+    while (normalizedExisting.contains('$baseName ($counter)'.toLowerCase())) {
+      counter++;
+    }
+    return '$baseName ($counter)';
+  }
+
+  Future<void> _showAddFabricDialog() async {
+    final nameCtrl = TextEditingController();
+    final costCtrl = TextEditingController();
+    final stockCtrl = TextEditingController(text: '0');
+    final reorderCtrl = TextEditingController(text: '0');
+    final imageUrlCtrl = TextEditingController();
+    final unitOptions = ['m', 'yard', 'ft'];
+    String selectedUnit = 'm';
+    String selectedCategory = _selectedCategory;
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Add Fabric'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Fabric Name',
+                    border: OutlineInputBorder(),
+                  ),
+                  inputFormatters: [
+                    TextInputFormatter.withFunction(
+                      (oldValue, newValue) => newValue.copyWith(
+                        text: newValue.text.toUpperCase(),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: costCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Cost Per Unit',
+                    prefixText: '\$ ',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: stockCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Stock',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: selectedUnit,
+                        decoration: const InputDecoration(
+                          labelText: 'Unit',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: unitOptions
+                            .map(
+                              (u) => DropdownMenuItem(
+                                value: u,
+                                child: Text(u),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setDialogState(() {
+                              selectedUnit = value;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: reorderCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Reorder Level',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedCategory,
+                  decoration: const InputDecoration(
+                    labelText: 'Category',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: _fabricCategories
+                      .map(
+                        (c) => DropdownMenuItem(value: c, child: Text(c)),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setDialogState(() {
+                        selectedCategory = value;
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: imageUrlCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Image URL (optional)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final name = nameCtrl.text.trim();
+                final cost = double.tryParse(costCtrl.text.trim());
+                final stock = double.tryParse(stockCtrl.text.trim()) ?? 0;
+                final reorderLevel =
+                    double.tryParse(reorderCtrl.text.trim()) ?? 0;
+
+                if (name.isEmpty || cost == null || cost < 0) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text('Please enter valid fabric name and cost.'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+
+                final duplicated = _fabrics
+                    .where(
+                      (f) => f.name.trim().toLowerCase() == name.toLowerCase(),
+                    )
+                    .toList();
+
+                String finalName = name;
+                String? overwriteId;
+
+                if (duplicated.isNotEmpty) {
+                  final decision = await showDialog<String>(
+                    context: dialogContext,
+                    builder: (dupCtx) => AlertDialog(
+                      title: const Text('Duplicate Fabric Name'),
+                      content: Text(
+                        'Fabric "$name" already exists.\n\n'
+                        'Choose how to continue:',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dupCtx, 'cancel'),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(dupCtx, 'overwrite'),
+                          child: const Text('Overwrite Existing'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => Navigator.pop(dupCtx, 'auto'),
+                          child: const Text('Auto-Number New'),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (decision == null || decision == 'cancel') {
+                    return;
+                  }
+                  if (decision == 'overwrite') {
+                    overwriteId = duplicated.first.id;
+                    finalName = duplicated.first.name;
+                  } else {
+                    finalName = _buildAutoNumberedFabricName(name);
+                  }
+                }
+
+                final newMaterial = MaterialItem(
+                  id: overwriteId ?? '',
+                  name: finalName,
+                  costPerUnit: cost,
+                  unit: selectedUnit,
+                  stock: stock,
+                  reorderLevel: reorderLevel,
+                  imageUrl: imageUrlCtrl.text.trim().isEmpty
+                      ? null
+                      : imageUrlCtrl.text.trim(),
+                  category: selectedCategory,
+                );
+
+                try {
+                  if (overwriteId != null) {
+                    await _dbService.updateMaterial(newMaterial);
+                  } else {
+                    await _dbService.addMaterial(newMaterial);
+                  }
+                  await _loadData();
+
+                  if (!mounted) return;
+                  setState(() {
+                    _selectedCategory = selectedCategory;
+                    if (overwriteId != null) {
+                      final existingIndex = _fabrics.indexWhere(
+                        (f) => f.id == overwriteId,
+                      );
+                      if (existingIndex >= 0) {
+                        _selectedFabric = _fabrics[existingIndex];
+                        return;
+                      }
+                    }
+                    final matched = _fabrics.where(
+                      (f) =>
+                          f.name.trim().toLowerCase() ==
+                              finalName.toLowerCase() &&
+                          (f.costPerUnit - cost).abs() < 0.001 &&
+                          f.category == selectedCategory,
+                    );
+                    if (matched.isNotEmpty) {
+                      _selectedFabric = matched.last;
+                    }
+                  });
+                  _calculateValues();
+
+                  if (dialogContext.mounted) {
+                    Navigator.pop(dialogContext);
+                  }
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        overwriteId != null
+                            ? 'Fabric "$finalName" overwritten.'
+                            : 'Fabric "$finalName" added.',
+                      ),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                } catch (e) {
+                  if (!mounted) return;
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Failed to add fabric: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              child: const Text('Add Fabric'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // 預估成本計算 (顯示用)
@@ -262,6 +554,13 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                   if (_selectedService != null && (_selectedService!.defaultFabricUsage > 0 || (widget.existingItem?.fabricUsed ?? 0) > 0)) ...[
                     const Text('2. Select Fabric Type', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                     const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _showAddFabricDialog,
+                        child: const Text('+ Add Fabric'),
+                      ),
+                    ),
                     Wrap(
                       spacing: 8.0,
                       children: _fabricCategories.map((category) {
