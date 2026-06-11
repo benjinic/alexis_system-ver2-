@@ -7,6 +7,8 @@ import '../models/order.dart';
 import '../models/workshop_order.dart';
 import '../models/workshop_status.dart';
 import '../models/customer.dart';
+import '../models/service_item.dart';
+import '../services/cost_calculation_service.dart';
 import '../services/database_service.dart';
 import '../services/pdf_service.dart';
 import '../providers/cart_provider.dart';
@@ -27,9 +29,11 @@ class _POSPageState extends State<POSPage> {
   final TextEditingController _discountController = TextEditingController();
   final TextEditingController _depositController = TextEditingController();
   final TextEditingController _balancePaymentController = TextEditingController();
+  final TextEditingController _fixedCostController = TextEditingController();
 
   String? _selectedCustomerId;
   Customer? _selectedCustomer;
+  Map<String, ServiceItem> _serviceByName = {};
 
   bool _isLoading = false;
   String _selectedPaymentMethod = 'Cash';
@@ -47,6 +51,15 @@ class _POSPageState extends State<POSPage> {
   late Stream<DateTime> _timeStream;
   late Stream<List<Customer>> _customersStream;
   Stream<int>? _nextOrderIdStream;
+  StreamSubscription<List<ServiceItem>>? _servicesSubscription;
+
+  // Completed/cancelled orders keep their original financial values.
+  // Confirmed edit orders can still recalculate totals from the latest cart.
+  bool get _isHistorical {
+    if (widget.orderForEdit == null) return false;
+    final status = widget.orderForEdit!.status.toLowerCase();
+    return status == 'completed' || status == 'cancelled';
+  }
 
   @override
   void initState() {
@@ -55,6 +68,12 @@ class _POSPageState extends State<POSPage> {
         .asBroadcastStream();
     _customersStream = _dbService.getCustomersStream();
     _dbService.seedDefaultServices();
+    _servicesSubscription = _dbService.getServicesStream().listen((services) {
+      if (!mounted) return;
+      setState(() {
+        _serviceByName = {for (final service in services) service.name: service};
+      });
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final cart = context.read<CartProvider>();
@@ -76,6 +95,8 @@ class _POSPageState extends State<POSPage> {
     _discountController.dispose();
     _depositController.dispose();
     _balancePaymentController.dispose();
+    _fixedCostController.dispose();
+    _servicesSubscription?.cancel();
     super.dispose();
   }
 
@@ -91,6 +112,8 @@ class _POSPageState extends State<POSPage> {
           order.discount == 0 ? '' : order.discount.toStringAsFixed(0);
       _depositController.text =
           order.deposit == 0 ? '' : order.deposit.toStringAsFixed(0);
+      _fixedCostController.text =
+          order.fixedCost == 0 ? '' : order.fixedCost.toStringAsFixed(0);
 
       _balancePaymentController.text = order.balancePayment == 0
           ? ''
@@ -406,19 +429,71 @@ class _POSPageState extends State<POSPage> {
     setState(() => _isLoading = true);
 
     try {
-      double subtotal = cart.subtotal;
-      double totalCost = cart.totalCost;
-      double discount = double.tryParse(_discountController.text) ?? 0.0;
-      double total = (subtotal - discount).clamp(0, double.infinity);
+      final allServices = await _dbService.getServicesStream().first;
+      final serviceByName = {
+        for (final service in allServices) service.name: service,
+      };
+      final syncedItems = _isHistorical
+          ? cart.items
+          : CostCalculationService.syncItemsWithServicePrices(
+              cart.items,
+              serviceByName: serviceByName,
+            );
+      final subtotal = _isHistorical
+          ? widget.orderForEdit!.subtotal
+          : CostCalculationService.calculateSubtotalFromItems(
+              syncedItems,
+              serviceByName: serviceByName,
+            );
+      final materialCost = _isHistorical
+          ? widget.orderForEdit!.materialCost
+          : cart.totalCost;
+      final laborCost = widget.orderForEdit?.laborCost ?? 0.0;
+      final outsourcingCost = _isHistorical
+          ? widget.orderForEdit!.outsourcingCost
+          : CostCalculationService.calculateOutsourcingCostFromItems(
+              syncedItems,
+              serviceByName: serviceByName,
+            );
+      final fixedCost = double.tryParse(_fixedCostController.text) ??
+          (_isHistorical ? widget.orderForEdit!.fixedCost : 0.0);
+      final totalCost = _isHistorical
+          ? widget.orderForEdit!.totalCost
+          : CostCalculationService.calculateTotalCost(
+              materialCost: materialCost,
+              outsourcingCost: outsourcingCost,
+              fixedCost: fixedCost,
+            );
+      final discount = double.tryParse(_discountController.text) ??
+          (_isHistorical ? widget.orderForEdit!.discount : 0.0);
+      final total = _isHistorical
+          ? widget.orderForEdit!.total
+          : CostCalculationService.calculateDiscountedTotal(
+              subtotal: subtotal,
+              discount: discount,
+            );
 
-      double deposit = double.tryParse(_depositController.text) ?? 0.0;
-      double balancePayment =
-          double.tryParse(_balancePaymentController.text) ?? 0.0;
-      double balance = total - (deposit + balancePayment);
-      if (balance < 0) balance = 0;
+      double deposit = _isHistorical
+          ? widget.orderForEdit!.deposit
+          : double.tryParse(_depositController.text) ?? 0.0;
+      double balancePayment = _isHistorical
+          ? widget.orderForEdit!.balancePayment
+          : double.tryParse(_balancePaymentController.text) ?? 0.0;
+      double balance = _isHistorical
+          ? widget.orderForEdit!.balance
+          : CostCalculationService.calculateBalance(
+              total: total,
+              deposit: deposit,
+              balancePayment: balancePayment,
+            );
 
-      double totalProfit = total - totalCost;
-      String orderStatus = balance <= 0 ? 'completed' : 'confirmed';
+      double totalProfit =
+          _isHistorical ? widget.orderForEdit!.totalProfit : total - totalCost;
+      String orderStatus = _isHistorical
+          ? widget.orderForEdit!.status
+          : balance <= 0
+          ? 'completed'
+          : 'confirmed';
 
       bool isEditMode = widget.orderForEdit != null;
       String orderId = isEditMode ? widget.orderForEdit!.id : '';
@@ -453,23 +528,33 @@ class _POSPageState extends State<POSPage> {
             : DateTime.now().millisecondsSinceEpoch.toString(),
         customerId: customerId,
         customerName: finalCustomerName,
-        items: cart.items,
+        items: syncedItems,
         subtotal: subtotal,
         discount: discount,
         total: total,
         deposit: deposit,
         balancePayment: balancePayment,
-        balancePaymentMethod: balancePayment > 0
+        balancePaymentMethod: _isHistorical
+            ? widget.orderForEdit!.balancePaymentMethod
+            : balancePayment > 0
             ? _selectedBalancePaymentMethod
             : null,
-        balancePaidDate: balancePayment > 0
+        balancePaidDate: _isHistorical
+            ? widget.orderForEdit!.balancePaidDate
+            : balancePayment > 0
             ? DateTime.now()
             : widget.orderForEdit?.balancePaidDate,
         balance: balance,
+        materialCost: materialCost,
+        laborCost: laborCost,
+        outsourcingCost: outsourcingCost,
+        fixedCost: fixedCost,
         totalCost: totalCost,
         totalProfit: totalProfit,
         status: orderStatus,
-        paymentMethod: _selectedPaymentMethod,
+        paymentMethod: _isHistorical
+            ? widget.orderForEdit!.paymentMethod
+            : _selectedPaymentMethod,
         createdAt: isEditMode ? widget.orderForEdit!.createdAt : DateTime.now(),
         updatedAt: DateTime.now(),
       );
@@ -485,10 +570,7 @@ class _POSPageState extends State<POSPage> {
         orderId = await _dbService.addOrder(orderData);
         orderForPrinting = orderData.copyWith(id: orderId);
 
-        // Fetch all service settings to enable duration lookup
-        final allServices = await _dbService.getServicesStream().first;
-
-        for (var item in cart.items) {
+        for (var item in syncedItems) {
           if (item.fabricUsed > 0 || item.service == 'Alterations') {
             // Look up service duration from settings
             int productionDays = 7; // Default fallback
@@ -669,6 +751,7 @@ class _POSPageState extends State<POSPage> {
             _discountController.clear();
             _depositController.clear();
             _balancePaymentController.clear();
+            _fixedCostController.clear();
             _selectedCustomer = null;
             _selectedCustomerId = null;
             _selectedPaymentMethod = 'Cash';
@@ -863,6 +946,12 @@ class _POSPageState extends State<POSPage> {
                     separatorBuilder: (_, __) => const Divider(),
                     itemBuilder: (context, index) {
                       final item = cart.items[index];
+                      final unitPrice = _isHistorical
+                          ? item.price
+                          : CostCalculationService.resolveUnitPrice(
+                              item,
+                              serviceByName: _serviceByName,
+                            );
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
                         title: Row(
@@ -905,7 +994,7 @@ class _POSPageState extends State<POSPage> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              '\$${(item.price * item.quantity).toStringAsFixed(0)}', // 顯示總價 (單價x數量)
+                              '\$${(unitPrice * item.quantity).toStringAsFixed(0)}',
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
@@ -952,14 +1041,49 @@ class _POSPageState extends State<POSPage> {
   Widget _buildSummaryCard() {
     final cart = context.watch<CartProvider>();
 
-    double subtotal = cart.subtotal;
-    double discount = double.tryParse(_discountController.text) ?? 0.0;
-    double total = (subtotal - discount).clamp(0, double.infinity);
+    double subtotal = _isHistorical
+        ? widget.orderForEdit!.subtotal
+        : CostCalculationService.calculateSubtotalFromItems(
+            cart.items,
+            serviceByName: _serviceByName,
+          );
+    double materialCost = _isHistorical
+        ? widget.orderForEdit!.materialCost
+        : cart.totalCost;
+    double outsourcingCost = _isHistorical
+        ? widget.orderForEdit!.outsourcingCost
+        : CostCalculationService.calculateOutsourcingCostFromItems(
+            cart.items,
+            serviceByName: _serviceByName,
+          );
+    double fixedCost = double.tryParse(_fixedCostController.text) ??
+        (_isHistorical ? widget.orderForEdit!.fixedCost : 0.0);
+    double totalCost = _isHistorical
+        ? widget.orderForEdit!.totalCost
+        : CostCalculationService.calculateTotalCost(
+            materialCost: materialCost,
+            outsourcingCost: outsourcingCost,
+            fixedCost: fixedCost,
+          );
+    double discount = double.tryParse(_discountController.text) ??
+        (_isHistorical ? widget.orderForEdit!.discount : 0.0);
+    double total = _isHistorical
+        ? widget.orderForEdit!.total
+        : CostCalculationService.calculateDiscountedTotal(
+            subtotal: subtotal,
+            discount: discount,
+          );
+    double totalProfit =
+        _isHistorical ? widget.orderForEdit!.totalProfit : total - totalCost;
 
     double deposit = double.tryParse(_depositController.text) ?? 0.0;
     double balancePayment =
         double.tryParse(_balancePaymentController.text) ?? 0.0;
-    double balance = total - (deposit + balancePayment);
+    double balance = CostCalculationService.calculateBalance(
+      total: total,
+      deposit: deposit,
+      balancePayment: balancePayment,
+    );
 
     String btnText = widget.orderForEdit != null
         ? 'UPDATE ORDER'
@@ -1054,6 +1178,58 @@ class _POSPageState extends State<POSPage> {
             ),
             const SizedBox(height: 16),
             _buildRow('Total', total, isBold: true, fontSize: 20),
+            const SizedBox(height: 16),
+            const Divider(),
+
+            const SizedBox(height: 8),
+            const Text(
+              'Cost Breakdown',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            _buildRow(
+              'Material Cost',
+              materialCost,
+              color: Colors.grey[700],
+            ),
+            const SizedBox(height: 8),
+            _buildRow(
+              'Outsourcing Cost',
+              outsourcingCost,
+              color: Colors.grey[700],
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _fixedCostController,
+              readOnly: _isHistorical,
+              decoration: const InputDecoration(
+                labelText: 'Fixed Cost',
+                prefixIcon: Icon(Icons.apartment_outlined),
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+              ],
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            _buildRow(
+              'Total Cost',
+              totalCost,
+              isBold: true,
+              color: Colors.red[400],
+            ),
+            const SizedBox(height: 8),
+            _buildRow(
+              'Estimated Profit',
+              totalProfit,
+              isBold: true,
+              color: totalProfit >= 0 ? Colors.green[700] : Colors.red[700],
+            ),
             const SizedBox(height: 16),
             const Divider(),
 

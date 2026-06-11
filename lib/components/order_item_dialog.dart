@@ -40,6 +40,7 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
   bool _isLoadingFabrics = true;
   ServiceItem? _selectedService;
   MaterialItem? _selectedFabric;
+  bool _isManualPriceEdited = false;
   // Fabric categories and current selection
   final List<String> _fabricCategories = ['Cotton', 'Linen', 'Wool', 'Other'];
   String _selectedCategory = 'Cotton';
@@ -58,6 +59,7 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
         text: widget.existingItem?.fabricUsed.toString() ?? '0');
     _quantityController = TextEditingController(
         text: widget.existingItem?.quantity.toString() ?? '1');
+    _isManualPriceEdited = widget.existingItem?.manualUnitPrice ?? false;
   }
 
   Future<void> _loadData() async {
@@ -117,8 +119,8 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
 
       _suggestedPriceController.text = suggestedPrice.toStringAsFixed(0);
 
-      // 如果是新增模式且價格欄位為空，才自動填入
-      if (_priceController.text.isEmpty) {
+      // 如果仍未手動改價，才自動填入建議價
+      if (!_isManualPriceEdited && _priceController.text.isEmpty) {
         _priceController.text = suggestedPrice.toStringAsFixed(0);
       }
     }
@@ -127,9 +129,16 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
   void _handleSave() {
     if (_selectedService == null) return;
 
-    final double finalPrice = double.tryParse(_priceController.text) ?? _selectedService!.price;
+    final servicePrice = _selectedService!.price;
+    final sanitizedPriceText = _priceController.text.trim().replaceAll(',', '');
+    final enteredPrice = double.tryParse(sanitizedPriceText);
+    final double finalPrice = (enteredPrice ?? servicePrice) < 0
+        ? 0
+        : (enteredPrice ?? servicePrice);
     final double finalUsage = double.tryParse(_usageController.text) ?? 0.0;
     final int finalQty = int.tryParse(_quantityController.text) ?? 1;
+    final bool manualUnitPrice =
+        _isManualPriceEdited || (finalPrice - servicePrice).abs() > 0.001;
     
     // 計算預估成本 (僅布料)
     double estimatedMaterialCost = 0;
@@ -146,6 +155,8 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
       fabricName: _selectedFabric?.name,
       fabricUsed: finalUsage,
       cost: estimatedMaterialCost,
+      isFabricOrdered: widget.existingItem?.isFabricOrdered ?? false,
+      manualUnitPrice: manualUnitPrice,
     );
 
     // 透過 Provider 更新
@@ -373,7 +384,15 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                         child: TextFormField(
                           controller: _priceController,
                           decoration: const InputDecoration(labelText: 'Unit Price', prefixIcon: Icon(Icons.attach_money), border: OutlineInputBorder()),
-                          keyboardType: TextInputType.number,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                          ],
+                          onChanged: (_) {
+                            if (!_isManualPriceEdited) {
+                              setState(() => _isManualPriceEdited = true);
+                            }
+                          },
                         ),
                       ),
                       const SizedBox(width: 12),
