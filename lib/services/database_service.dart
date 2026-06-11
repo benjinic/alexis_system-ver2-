@@ -8,6 +8,7 @@ import '../models/workshop_order.dart';
 import '../models/customer.dart';
 import '../models/service_item.dart';
 import 'database_service_interface.dart';
+import 'fabric_order_status_sync.dart';
 
 class DatabaseService implements DatabaseServiceInterface {
   static const String _logName = 'DatabaseService';
@@ -425,14 +426,8 @@ class DatabaseService implements DatabaseServiceInterface {
 
     for (final doc in orderItemsSnapshot.docs) {
       final item = doc.data() as Map<String, dynamic>;
-      final fabricId = item['fabricId']?.toString().trim() ?? '';
-      final fabricName = item['fabricName']?.toString().trim() ?? '';
-      final fabricUsed =
-          (item['fabricUsed'] as num?)?.toDouble() ??
-          (item['fabricUsage'] as num?)?.toDouble() ??
-          0;
 
-      if (fabricId.isEmpty && fabricName.isEmpty && fabricUsed <= 0) {
+      if (!FabricOrderStatusSync.itemMapRequiresFabric(item)) {
         continue;
       }
 
@@ -512,19 +507,9 @@ class DatabaseService implements DatabaseServiceInterface {
         .map((doc) => doc.data() as Map<String, dynamic>)
         .toList();
 
-    final fabricRequiredItems = itemMaps.where((item) {
-      final fabricId = item['fabricId']?.toString().trim() ?? '';
-      final fabricName = item['fabricName']?.toString().trim() ?? '';
-      final fabricUsed =
-          (item['fabricUsed'] as num?)?.toDouble() ??
-          (item['fabricUsage'] as num?)?.toDouble() ??
-          0;
-      return fabricId.isNotEmpty || fabricName.isNotEmpty || fabricUsed > 0;
-    }).toList();
-
-    final allFabricOrdered =
-        fabricRequiredItems.isNotEmpty &&
-        fabricRequiredItems.every((item) => item['isFabricOrdered'] == true);
+    final allFabricOrdered = FabricOrderStatusSync.areAllRequiredItemsOrdered(
+      itemMaps,
+    );
 
     await _ordersRef.doc(orderId).update({
       'isFabricOrdered': allFabricOrdered,
