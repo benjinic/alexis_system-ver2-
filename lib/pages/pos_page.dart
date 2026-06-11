@@ -535,6 +535,7 @@ class _POSPageState extends State<POSPage> {
               progress: 0,
               createdAt: DateTime.now(),
               updatedAt: DateTime.now(),
+              isFabricOrdered: false,
             );
 
             await _dbService.addWorkshopOrder(ticket);
@@ -610,6 +611,46 @@ class _POSPageState extends State<POSPage> {
             await PdfService().printWorkshopOrder(
               context,
               ticket.copyWith(id: orderId),
+            );
+          }
+        }
+      }
+
+      // === Step 5.5: Fabric ordering reminder ===
+      if (mounted && !isEditMode) {
+        final fabricItems = cart.items.where((item) =>
+            (item.fabricId ?? '').trim().isNotEmpty ||
+            (item.fabricName ?? '').trim().isNotEmpty ||
+            item.fabricUsed > 0).toList();
+
+        if (fabricItems.isNotEmpty) {
+          final markOrdered = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => AlertDialog(
+              title: const Text('訂布提醒'),
+              content: const Text('此訂單包含需要布料的項目。是否已完成訂購布料？'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('稍後處理'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('已訂布料'),
+                ),
+              ],
+            ),
+          );
+
+          if (markOrdered == true) {
+            await _dbService.updateOrderFabricRequiredItemsStatus(
+              orderId: orderId,
+              isFabricOrdered: true,
+            );
+            await _dbService.updateWorkshopOrdersFabricStatus(
+              orderId: orderId,
+              isFabricOrdered: true,
             );
           }
         }

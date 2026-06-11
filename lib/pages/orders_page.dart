@@ -54,6 +54,37 @@ class _OrdersPageState extends State<OrdersPage> {
     });
   }
 
+  Future<bool?> _toggleFabricOrdered({
+    required String orderId,
+    required bool currentStatus,
+  }) async {
+    final nextStatus = !currentStatus;
+    try {
+      await _dbService.updateOrderFabricRequiredItemsStatus(
+        orderId: orderId,
+        isFabricOrdered: nextStatus,
+      );
+      await _dbService.updateWorkshopOrdersFabricStatus(
+        orderId: orderId,
+        isFabricOrdered: nextStatus,
+      );
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(nextStatus ? '布料已標記為已訂購' : '布料標記為未訂購')),
+      );
+      return nextStatus;
+    } catch (e) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update fabric status: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return null;
+    }
+  }
+
   // === 修正後的匯出邏輯 ===
   Future<void> _handleExport() async {
     // 1. 顯示 Loading
@@ -146,9 +177,22 @@ class _OrdersPageState extends State<OrdersPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // 狀態標籤
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: _buildStatusBadge(order.status),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              if (order.status != 'completed' &&
+                                  order.status != 'cancelled')
+                                _buildFabricStatusChip(
+                                  isFabricOrdered: order.isFabricOrdered,
+                                  onTap: () => _toggleFabricOrdered(
+                                    orderId: order.id,
+                                    currentStatus: order.isFabricOrdered,
+                                  ),
+                                )
+                              else
+                                const SizedBox.shrink(),
+                              _buildStatusBadge(order.status),
+                            ],
                           ),
                           const SizedBox(height: 16),
                           // 客戶與日期
@@ -781,6 +825,14 @@ class _OrdersPageState extends State<OrdersPage> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
+                        if (order.status != 'completed' &&
+                            order.status != 'cancelled') ...[
+                          _buildFabricStatusChip(
+                            isFabricOrdered: order.isFabricOrdered,
+                            compact: true,
+                          ),
+                          const SizedBox(height: 8),
+                        ],
                         Text(
                           order.items.isNotEmpty
                               ? '${order.items.length} items (${order.items.first.service}...)'
@@ -840,6 +892,56 @@ class _OrdersPageState extends State<OrdersPage> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFabricStatusChip({
+    required bool isFabricOrdered,
+    bool enabled = true,
+    bool compact = false,
+    VoidCallback? onTap,
+  }) {
+    final color = !enabled
+        ? Colors.blueGrey
+        : (isFabricOrdered ? Colors.green : Colors.orange);
+    final label = !enabled
+        ? 'No Fabric Required'
+        : (isFabricOrdered ? 'Fabric Ordered' : 'Pending Fabric');
+    final icon = !enabled
+        ? Icons.inventory_2_outlined
+        : (isFabricOrdered
+              ? Icons.check_circle_outline
+              : Icons.local_shipping_outlined);
+
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 8 : 10,
+          vertical: compact ? 4 : 6,
+        ),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: color.withOpacity(0.35)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: compact ? 13 : 14, color: color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: compact ? 10 : 12,
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
       ),
     );

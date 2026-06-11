@@ -411,6 +411,46 @@ class DatabaseService implements DatabaseServiceInterface {
     });
   }
 
+  // 批量更新同一訂單內所有需要布料的細項，並同步主訂單布料狀態。
+  Future<void> updateOrderFabricRequiredItemsStatus({
+    required String orderId,
+    required bool isFabricOrdered,
+  }) async {
+    final orderItemsSnapshot = await _orderItemsRef
+        .where('orderId', isEqualTo: orderId)
+        .get();
+
+    final batch = _firestore.batch();
+    var hasFabricRequiredItems = false;
+
+    for (final doc in orderItemsSnapshot.docs) {
+      final item = doc.data() as Map<String, dynamic>;
+      final fabricId = item['fabricId']?.toString().trim() ?? '';
+      final fabricName = item['fabricName']?.toString().trim() ?? '';
+      final fabricUsed =
+          (item['fabricUsed'] as num?)?.toDouble() ??
+          (item['fabricUsage'] as num?)?.toDouble() ??
+          0;
+
+      if (fabricId.isEmpty && fabricName.isEmpty && fabricUsed <= 0) {
+        continue;
+      }
+
+      hasFabricRequiredItems = true;
+      batch.update(doc.reference, {
+        'isFabricOrdered': isFabricOrdered,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    batch.update(_ordersRef.doc(orderId), {
+      'isFabricOrdered': hasFabricRequiredItems && isFabricOrdered,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
+  }
+
   // 只更新訂單成本拆解中的 Material / Outsourcing，並同步重算總成本與利潤。
   Future<void> updateOrderCostBreakdown({
     required String orderId,

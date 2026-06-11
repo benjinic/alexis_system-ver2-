@@ -137,20 +137,36 @@ class _WorkshopPageState extends State<WorkshopPage> {
   }
 
   Future<void> _toggleFabricOrdered(WorkshopOrder order) async {
-    await _dbService.updateWorkshopOrder(
-      order.copyWith(
-        isFabricOrdered: !order.isFabricOrdered,
-        updatedAt: DateTime.now(),
-      ),
-    );
+    final nextStatus = !order.isFabricOrdered;
+    try {
+      await _dbService.updateWorkshopOrder(
+        order.copyWith(isFabricOrdered: nextStatus, updatedAt: DateTime.now()),
+      );
 
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(order.isFabricOrdered ? '布料標記為未訂購' : '布料已標記為已訂購'),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+      if (order.orderId.trim().isNotEmpty) {
+        await _dbService.updateOrderFabricRequiredItemsStatus(
+          orderId: order.orderId,
+          isFabricOrdered: nextStatus,
+        );
+        await _dbService.updateWorkshopOrdersFabricStatus(
+          orderId: order.orderId,
+          isFabricOrdered: nextStatus,
+        );
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(nextStatus ? '布料已標記為已訂購' : '布料標記為未訂購'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('布料狀態同步失敗: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   // === 3. 下拉更新邏輯 ===
