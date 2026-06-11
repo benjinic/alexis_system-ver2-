@@ -7,6 +7,7 @@ import '../models/order.dart';
 import '../models/workshop_order.dart';
 import '../models/workshop_status.dart';
 import '../models/customer.dart';
+import '../models/material_item.dart';
 import '../models/service_item.dart';
 import '../services/cost_calculation_service.dart';
 import '../services/database_service.dart';
@@ -406,6 +407,20 @@ class _POSPageState extends State<POSPage> {
       builder: (context) => OrderItemDialog(
         existingItem: existingItem,
         index: index,
+      ),
+    );
+  }
+
+  Future<void> _showFabricImageDialog({
+    required List<OrderItem> orderItems,
+    required OrderItem selectedItem,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _FabricGalleryDialog(
+        dbService: _dbService,
+        orderItems: orderItems,
+        selectedItem: selectedItem,
       ),
     );
   }
@@ -952,6 +967,10 @@ class _POSPageState extends State<POSPage> {
                               item,
                               serviceByName: _serviceByName,
                             );
+                      final hasFabricReference =
+                          (item.fabricId ?? '').trim().isNotEmpty ||
+                          (item.fabricName ?? '').trim().isNotEmpty ||
+                          item.fabricUsed > 0;
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
                         title: Row(
@@ -1001,6 +1020,20 @@ class _POSPageState extends State<POSPage> {
                               ),
                             ),
                             const SizedBox(width: 8),
+                            if (hasFabricReference) ...[
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.image_outlined,
+                                  color: Colors.teal,
+                                ),
+                                tooltip: 'Preview fabric images',
+                                onPressed: () => _showFabricImageDialog(
+                                  orderItems: cart.items,
+                                  selectedItem: item,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                            ],
                             // 編輯按鈕
                             IconButton(
                               icon: const Icon(Icons.edit, color: Colors.blue),
@@ -1397,6 +1430,247 @@ class _POSPageState extends State<POSPage> {
             fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
             color: color,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FabricPreview {
+  final OrderItem item;
+  final String materialName;
+  final String imageUrl;
+
+  const _FabricPreview({
+    required this.item,
+    required this.materialName,
+    required this.imageUrl,
+  });
+}
+
+class _FabricGalleryDialog extends StatefulWidget {
+  final DatabaseService dbService;
+  final List<OrderItem> orderItems;
+  final OrderItem selectedItem;
+
+  const _FabricGalleryDialog({
+    required this.dbService,
+    required this.orderItems,
+    required this.selectedItem,
+  });
+
+  @override
+  State<_FabricGalleryDialog> createState() => _FabricGalleryDialogState();
+}
+
+class _FabricGalleryDialogState extends State<_FabricGalleryDialog> {
+  late Future<List<_FabricPreview>> _previewsFuture;
+  PageController? _pageController;
+  int _currentPage = 0;
+  final TransformationController _transformationController =
+      TransformationController();
+
+  @override
+  void initState() {
+    super.initState();
+    _previewsFuture = _loadPreviews();
+  }
+
+  @override
+  void dispose() {
+    _pageController?.dispose();
+    _transformationController.dispose();
+    super.dispose();
+  }
+
+  Future<List<_FabricPreview>> _loadPreviews() async {
+    final allMaterials = await widget.dbService.getInventory();
+    final materialsById = {
+      for (final material in allMaterials) material.id: material,
+    };
+    final materialsByName = {
+      for (final material in allMaterials)
+        material.name.trim().toLowerCase(): material,
+    };
+
+    final previews = <_FabricPreview>[];
+    for (final item in widget.orderItems) {
+      MaterialItem? material;
+      final fabricId = item.fabricId?.trim() ?? '';
+      final fabricName = item.fabricName?.trim().toLowerCase() ?? '';
+
+      if (fabricId.isNotEmpty) {
+        material = materialsById[fabricId];
+      }
+      material ??= materialsByName[fabricName];
+
+      final imageUrl = material?.imageUrl?.trim() ?? '';
+      if (imageUrl.isEmpty) {
+        continue;
+      }
+
+      previews.add(
+        _FabricPreview(
+          item: item,
+          materialName: material?.name ?? item.fabricName ?? 'Fabric',
+          imageUrl: imageUrl,
+        ),
+      );
+    }
+
+    return previews;
+  }
+
+  int _resolveInitialPage(List<_FabricPreview> previews) {
+    final selectedId = widget.selectedItem.id;
+    if (selectedId.isNotEmpty) {
+      final byId = previews.indexWhere((p) => p.item.id == selectedId);
+      if (byId >= 0) return byId;
+    }
+
+    final selectedFabricId = widget.selectedItem.fabricId ?? '';
+    if (selectedFabricId.isNotEmpty) {
+      final byFabricId = previews.indexWhere(
+        (p) => p.item.fabricId == selectedFabricId,
+      );
+      if (byFabricId >= 0) return byFabricId;
+    }
+
+    final selectedFabricName = widget.selectedItem.fabricName?.trim() ?? '';
+    if (selectedFabricName.isNotEmpty) {
+      final byFabricName = previews.indexWhere(
+        (p) => (p.item.fabricName?.trim() ?? '') == selectedFabricName,
+      );
+      if (byFabricName >= 0) return byFabricName;
+    }
+
+    return 0;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Fabric Images'),
+      content: SizedBox(
+        width: 500,
+        child: FutureBuilder<List<_FabricPreview>>(
+          future: _previewsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const SizedBox(
+                height: 280,
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+
+            if (snapshot.hasError) {
+              return const SizedBox(
+                height: 140,
+                child: Center(child: Text('Failed to load fabric images.')),
+              );
+            }
+
+            final previews = snapshot.data ?? const <_FabricPreview>[];
+            if (previews.isEmpty) {
+              return const SizedBox(
+                height: 140,
+                child: Center(
+                  child: Text('No fabric images available for this order.'),
+                ),
+              );
+            }
+
+            final initialPage = _resolveInitialPage(previews);
+            _pageController ??= PageController(initialPage: initialPage);
+            if (_currentPage >= previews.length) {
+              _currentPage = previews.length - 1;
+            }
+
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  previews[_currentPage].materialName,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  previews[_currentPage].item.service,
+                  style: TextStyle(color: Colors.grey[700]),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 340,
+                  child: PageView.builder(
+                    controller: _pageController,
+                    itemCount: previews.length,
+                    onPageChanged: (index) {
+                      _transformationController.value = Matrix4.identity();
+                      setState(() {
+                        _currentPage = index;
+                      });
+                    },
+                    itemBuilder: (context, index) {
+                      final preview = previews[index];
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(color: Colors.grey[100]),
+                          child: GestureDetector(
+                            onDoubleTap: () {
+                              _transformationController.value =
+                                  Matrix4.identity();
+                            },
+                            child: InteractiveViewer(
+                              transformationController:
+                                  _transformationController,
+                              minScale: 1,
+                              maxScale: 5,
+                              child: Image.network(
+                                preview.imageUrl,
+                                fit: BoxFit.contain,
+                                errorBuilder: (_, _, _) {
+                                  return const Center(
+                                    child: Text(
+                                      'Unable to display fabric image.',
+                                    ),
+                                  );
+                                },
+                                loadingBuilder: (context, child, progress) {
+                                  if (progress == null) return child;
+                                  return const Center(
+                                    child: CircularProgressIndicator(),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Swipe left/right to view more',
+                      style: TextStyle(color: Colors.grey[700]),
+                    ),
+                    Text('${_currentPage + 1} / ${previews.length}'),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
         ),
       ],
     );
