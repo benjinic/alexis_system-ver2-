@@ -4,6 +4,7 @@ import '../models/order.dart';
 import '../services/database_service.dart';
 import '../services/pdf_service.dart';
 import '../services/export_service.dart';
+import 'order_images_page.dart';
 import 'pos_page.dart';
 
 class OrdersPage extends StatefulWidget {
@@ -531,6 +532,28 @@ class _OrdersPageState extends State<OrdersPage> {
                             ),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => OrderImagesPage(
+                                  orderId: order.id,
+                                  orderLabel: 'Order #${order.id}',
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: const Text('Photos'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 12),
                       SizedBox(
