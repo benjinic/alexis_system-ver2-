@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../models/material_item.dart';
 import '../models/order.dart';
 import '../services/database_service.dart';
 import '../services/pdf_service.dart';
@@ -53,6 +54,41 @@ class _OrdersPageState extends State<OrdersPage> {
     setState(() {
       _ordersLimit += 20; // Load 20 more orders each time
     });
+  }
+
+  void _showImageLightbox(BuildContext context, String imageUrl, String title) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.black.withValues(alpha: 0.9),
+        insetPadding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppBar(
+              title: Text(title),
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              leading: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white),
+                onPressed: () => Navigator.pop(dialogContext),
+              ),
+            ),
+            Flexible(
+              child: InteractiveViewer(
+                child: Image.network(imageUrl, fit: BoxFit.contain),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool _requiresFabric(OrderItem item) {
+    return (item.fabricId ?? '').trim().isNotEmpty ||
+        (item.fabricName ?? '').trim().isNotEmpty ||
+        item.fabricUsed > 0;
   }
 
   Future<bool?> _toggleFabricOrdered({
@@ -245,81 +281,7 @@ class _OrdersPageState extends State<OrdersPage> {
                                 );
                               }
                               return Column(
-                                children: items
-                                    .map(
-                                      (item) => Container(
-                                        margin: const EdgeInsets.only(
-                                          bottom: 12,
-                                        ),
-                                        padding: const EdgeInsets.all(12),
-                                        decoration: BoxDecoration(
-                                          color: Colors.grey[50],
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                          border: Border.all(
-                                            color: Colors.grey[200]!,
-                                          ),
-                                        ),
-                                        child: Row(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Container(
-                                              padding: const EdgeInsets.all(8),
-                                              decoration: BoxDecoration(
-                                                color: Colors.blue[50],
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                              ),
-                                              child: Icon(
-                                                Icons.checkroom,
-                                                color: Colors.blue[800],
-                                                size: 20,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    item.service,
-                                                    style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                  if (item.fabricName != null)
-                                                    Padding(
-                                                      padding:
-                                                          const EdgeInsets.only(
-                                                            top: 4,
-                                                          ),
-                                                      child: Text(
-                                                        'Fabric: ${item.fabricName} (${item.fabricUsed}m)',
-                                                        style: TextStyle(
-                                                          fontSize: 12,
-                                                          color:
-                                                              Colors.grey[600],
-                                                        ),
-                                                      ),
-                                                    ),
-                                                ],
-                                              ),
-                                            ),
-                                            Text(
-                                              '\$${item.price.toStringAsFixed(0)}',
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    )
-                                    .toList(),
+                                children: items.map(_buildOrderItemCard).toList(),
                               );
                             },
                           ),
@@ -916,6 +878,215 @@ class _OrdersPageState extends State<OrdersPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Future<MaterialItem?> _loadMaterialForItem(OrderItem item) async {
+    final fabricId = item.fabricId?.trim() ?? '';
+    if (fabricId.isNotEmpty) {
+      return _dbService.getMaterialById(fabricId);
+    }
+
+    final fabricName = item.fabricName?.trim().toLowerCase() ?? '';
+    if (fabricName.isEmpty) return null;
+
+    final materials = await _dbService.getInventory();
+    for (final material in materials) {
+      if (material.name.trim().toLowerCase() == fabricName) {
+        return material;
+      }
+    }
+    return null;
+  }
+
+  Widget _buildOrderItemCard(OrderItem item) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.checkroom,
+                  color: Colors.blue[800],
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.service,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    if (item.fabricName != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'Fabric: ${item.fabricName} (${item.fabricUsed}m)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Text(
+                '\$${item.price.toStringAsFixed(0)}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          if (_requiresFabric(item)) ...[
+            const SizedBox(height: 10),
+            FutureBuilder<MaterialItem?>(
+              future: _loadMaterialForItem(item),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const LinearProgressIndicator(minHeight: 2);
+                }
+                return _buildFabricInfoCard(item, snapshot.data);
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFabricInfoCard(OrderItem item, MaterialItem? material) {
+    final imageUrl = material?.imageUrl?.trim();
+    final hasImage = imageUrl != null && imageUrl.isNotEmpty;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blueGrey.withValues(alpha: 0.15)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (hasImage)
+            GestureDetector(
+              onTap: () => _showImageLightbox(
+                context,
+                imageUrl,
+                material?.name ?? item.fabricName ?? 'Fabric Image',
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  imageUrl,
+                  height: 140,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return _buildFabricImageFallback();
+                  },
+                ),
+              ),
+            )
+          else
+            _buildFabricImageFallback(),
+          const SizedBox(height: 10),
+          Text(
+            material?.name ?? item.fabricName ?? 'Fabric details unavailable',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildFabricMetaChip(
+                Icons.straighten,
+                '${item.fabricUsed.toStringAsFixed(1)}m used',
+              ),
+              if ((item.fabricId ?? '').trim().isNotEmpty)
+                _buildFabricMetaChip(Icons.qr_code_2, item.fabricId!.trim()),
+              if (material != null)
+                _buildFabricMetaChip(Icons.sell_outlined, material.category),
+              if (material != null)
+                _buildFabricMetaChip(
+                  Icons.attach_money,
+                  'Cost \$${material.costPerUnit.toStringAsFixed(0)}/${material.unit}',
+                ),
+              if (material != null)
+                _buildFabricMetaChip(
+                  Icons.inventory_2_outlined,
+                  'Stock ${material.stock.toStringAsFixed(1)} ${material.unit}',
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFabricImageFallback() {
+    return Container(
+      height: 96,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.blueGrey[50],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.image_not_supported_outlined,
+            color: Colors.blueGrey[300],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'No fabric image',
+            style: TextStyle(fontSize: 12, color: Colors.blueGrey[400]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFabricMetaChip(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.blueGrey[50],
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.blueGrey[700]),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(fontSize: 12, color: Colors.blueGrey[700]),
+          ),
+        ],
       ),
     );
   }
