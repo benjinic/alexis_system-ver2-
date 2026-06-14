@@ -1,0 +1,349 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function hasOnlyFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function stringField(field) {
+      return field in request.resource.data &&
+        request.resource.data[field] is string;
+    }
+
+    function numberField(field) {
+      return field in request.resource.data &&
+        request.resource.data[field] is number;
+    }
+
+    function intField(field) {
+      return field in request.resource.data &&
+        request.resource.data[field] is int;
+    }
+
+    function optionalString(field) {
+      return !(field in request.resource.data) ||
+        request.resource.data[field] == null ||
+        request.resource.data[field] is string;
+    }
+
+    function optionalNumber(field) {
+      return !(field in request.resource.data) ||
+        request.resource.data[field] == null ||
+        request.resource.data[field] is number;
+    }
+
+    function optionalBool(field) {
+      return !(field in request.resource.data) ||
+        request.resource.data[field] == null ||
+        request.resource.data[field] is bool;
+    }
+
+    function optionalMap(field) {
+      return !(field in request.resource.data) ||
+        request.resource.data[field] == null ||
+        request.resource.data[field] is map;
+    }
+
+    function optionalList(field) {
+      return !(field in request.resource.data) ||
+        request.resource.data[field] == null ||
+        request.resource.data[field] is list;
+    }
+
+    function optionalTimestampOrInt(field) {
+      return !(field in request.resource.data) ||
+        request.resource.data[field] == null ||
+        request.resource.data[field] is timestamp ||
+        request.resource.data[field] is int;
+    }
+
+    function validOrder() {
+      return hasOnlyFields([
+          'uniqueId',
+          'customerId',
+          'customerName',
+          'itemSummary',
+          'fabricSummary',
+          'subtotal',
+          'discount',
+          'total',
+          'deposit',
+          'balancePayment',
+          'balancePaymentMethod',
+          'balancePaidDate',
+          'balance',
+          'materialCost',
+          'laborCost',
+          'outsourcingCost',
+          'fixedCost',
+          'totalCost',
+          'totalProfit',
+          'status',
+          'paymentMethod',
+          'createdAt',
+          'updatedAt',
+          'date',
+          'deliveryDate',
+          'isFabricOrdered'
+        ]) &&
+        hasRequiredFields([
+          'uniqueId',
+          'customerId',
+          'customerName',
+          'subtotal',
+          'discount',
+          'total',
+          'deposit',
+          'balance',
+          'totalCost',
+          'totalProfit',
+          'status',
+          'paymentMethod'
+        ]) &&
+        stringField('uniqueId') &&
+        stringField('customerId') &&
+        stringField('customerName') &&
+        numberField('subtotal') &&
+        numberField('discount') &&
+        numberField('total') &&
+        numberField('deposit') &&
+        numberField('balance') &&
+        numberField('totalCost') &&
+        numberField('totalProfit') &&
+        stringField('status') &&
+        stringField('paymentMethod') &&
+        optionalString('itemSummary') &&
+        optionalString('fabricSummary') &&
+        optionalNumber('balancePayment') &&
+        optionalString('balancePaymentMethod') &&
+        optionalTimestampOrInt('balancePaidDate') &&
+        optionalNumber('materialCost') &&
+        optionalNumber('laborCost') &&
+        optionalNumber('outsourcingCost') &&
+        optionalNumber('fixedCost') &&
+        optionalTimestampOrInt('createdAt') &&
+        optionalTimestampOrInt('updatedAt') &&
+        optionalTimestampOrInt('date') &&
+        optionalTimestampOrInt('deliveryDate') &&
+        optionalBool('isFabricOrdered');
+    }
+
+    function validOrderItem() {
+      return hasOnlyFields([
+          'id',
+          'orderId',
+          'service',
+          'price',
+          'quantity',
+          'fabricId',
+          'fabricName',
+          'fabricUsed',
+          'cost',
+          'isFabricOrdered',
+          'manualUnitPrice',
+          'serviceName',
+          'fabricCode',
+          'fabricCost',
+          'fabricUsage'
+        ]) &&
+        hasRequiredFields(['id', 'orderId', 'service', 'price', 'quantity']) &&
+        stringField('id') &&
+        stringField('orderId') &&
+        stringField('service') &&
+        numberField('price') &&
+        intField('quantity') &&
+        optionalString('fabricId') &&
+        optionalString('fabricName') &&
+        optionalNumber('fabricUsed') &&
+        optionalNumber('cost') &&
+        optionalBool('isFabricOrdered') &&
+        optionalBool('manualUnitPrice') &&
+        optionalString('serviceName') &&
+        optionalString('fabricCode') &&
+        optionalNumber('fabricCost') &&
+        optionalNumber('fabricUsage');
+    }
+
+    function validInventoryItem() {
+      return hasOnlyFields([
+          'name',
+          'costPerUnit',
+          'unit',
+          'stock',
+          'reorderLevel',
+          'imageUrl',
+          'category',
+          'retailPrice',
+          'isOnline',
+          'color'
+        ]) &&
+        hasRequiredFields(['name', 'costPerUnit', 'unit', 'stock', 'reorderLevel']) &&
+        stringField('name') &&
+        numberField('costPerUnit') &&
+        stringField('unit') &&
+        numberField('stock') &&
+        numberField('reorderLevel') &&
+        optionalString('imageUrl') &&
+        optionalString('category') &&
+        optionalNumber('retailPrice') &&
+        optionalBool('isOnline') &&
+        optionalString('color');
+    }
+
+    function validWorkshopOrder() {
+      return hasOnlyFields([
+          'orderId',
+          'customer',
+          'item',
+          'status',
+          'priority',
+          'dueDate',
+          'progress',
+          'notes',
+          'isFabricOrdered',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        hasRequiredFields([
+          'orderId',
+          'customer',
+          'item',
+          'status',
+          'priority',
+          'dueDate',
+          'progress'
+        ]) &&
+        stringField('orderId') &&
+        stringField('customer') &&
+        stringField('item') &&
+        stringField('status') &&
+        stringField('priority') &&
+        intField('dueDate') &&
+        intField('progress') &&
+        optionalString('notes') &&
+        optionalBool('isFabricOrdered') &&
+        optionalTimestampOrInt('createdAt') &&
+        optionalTimestampOrInt('updatedAt');
+    }
+
+    function validCustomer() {
+      return hasOnlyFields([
+          'name',
+          'email',
+          'phone',
+          'orders',
+          'totalSpent',
+          'createdAt',
+          'measurements'
+        ]) &&
+        hasRequiredFields(['name', 'email', 'phone', 'orders', 'totalSpent']) &&
+        stringField('name') &&
+        stringField('email') &&
+        stringField('phone') &&
+        intField('orders') &&
+        numberField('totalSpent') &&
+        optionalTimestampOrInt('createdAt') &&
+        optionalMap('measurements');
+    }
+
+    function validService() {
+      return hasOnlyFields([
+          'id',
+          'name',
+          'price',
+          'defaultFabricUsage',
+          'durationDays',
+          'markupMultiplier',
+          'allowModifiers',
+          'outsourcingCost'
+        ]) &&
+        hasRequiredFields(['name', 'price', 'defaultFabricUsage', 'durationDays']) &&
+        stringField('name') &&
+        numberField('price') &&
+        numberField('defaultFabricUsage') &&
+        intField('durationDays') &&
+        optionalString('id') &&
+        optionalNumber('markupMultiplier') &&
+        optionalBool('allowModifiers') &&
+        optionalNumber('outsourcingCost');
+    }
+
+    function validOrderImage() {
+      return hasOnlyFields(['orderId', 'imageUrl', 'fileName', 'uploadedAt']) &&
+        hasRequiredFields(['orderId', 'imageUrl', 'fileName']) &&
+        stringField('orderId') &&
+        stringField('imageUrl') &&
+        stringField('fileName') &&
+        optionalTimestampOrInt('uploadedAt');
+    }
+
+    function validSetting(settingId) {
+      return (settingId == 'order_counter' &&
+          hasOnlyFields(['current_id']) &&
+          intField('current_id')) ||
+        (settingId == 'measurements' &&
+          hasOnlyFields(['fields']) &&
+          optionalList('fields'));
+    }
+
+    match /orders/{orderId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validOrder();
+      allow delete: if signedIn();
+    }
+
+    match /order_items/{itemId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validOrderItem();
+      allow delete: if signedIn();
+    }
+
+    match /inventory/{itemId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validInventoryItem();
+      allow delete: if signedIn();
+    }
+
+    match /workshop_orders/{workshopOrderId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validWorkshopOrder();
+      allow delete: if signedIn();
+    }
+
+    match /customers/{customerId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validCustomer();
+      allow delete: if signedIn();
+    }
+
+    match /services/{serviceId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validService();
+      allow delete: if signedIn();
+    }
+
+    match /order_images/{imageId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && validOrderImage();
+      allow delete: if signedIn();
+    }
+
+    match /settings/{settingId} {
+      allow read: if signedIn() && settingId in ['order_counter', 'measurements'];
+      allow create, update: if signedIn() && validSetting(settingId);
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
