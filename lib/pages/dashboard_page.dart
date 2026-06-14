@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
+import '../components/icon_text.dart';
 import 'package:intl/intl.dart';
 import '../components/stat_card.dart';
 import '../components/revenue_chart.dart';
 import '../services/database_service.dart';
+import '../services/cost_calculation_service.dart';
 import '../models/order.dart';
 import '../models/customer.dart';
+import '../models/service_item.dart';
 import '../models/workshop_order.dart' as models;
 import '../models/workshop_status.dart';
+import '../l10n/app_localizations.dart';
 import 'orders_page.dart';
-import 'workshop_page.dart';
 import '../screens/customers_screen.dart';
 import 'cost_analysis_page.dart';
 
@@ -78,21 +81,29 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Dashboard'), elevation: 0),
+      appBar: AppBar(
+        title: Text(AppLocalizations.of(context).dashboardTitle),
+        elevation: 0,
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Header
-            const Text(
-              'Overview',
-              style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
+            Text(
+              AppLocalizations.of(context).overview,
+              style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
-              'Here is what\'s happening in your shop.',
-              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+              AppLocalizations.of(context).shopDescription,
+              style: TextStyle(
+                fontSize: 16,
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.7),
+              ),
             ),
             const SizedBox(height: 32),
 
@@ -102,7 +113,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 return _buildBentoGrid(constraints);
               },
             ),
-            
+
             const SizedBox(height: 32),
 
             // Revenue Chart
@@ -131,30 +142,49 @@ class _DashboardPageState extends State<DashboardPage> {
                   builder: (context, snapshot) {
                     final recentOrders = snapshot.data ?? [];
 
-                    if (constraints.maxWidth > 900) {
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            flex: 2,
-                            child: _buildRecentOrdersList(
-                              context,
-                              recentOrders,
-                            ),
-                          ),
-                          const SizedBox(width: 24),
-                          Expanded(flex: 1, child: _buildQuickActions(context)),
-                        ],
-                      );
-                    } else {
-                      return Column(
-                        children: [
-                          _buildRecentOrdersList(context, recentOrders),
-                          const SizedBox(height: 24),
-                          _buildQuickActions(context),
-                        ],
-                      );
-                    }
+                    return StreamBuilder<List<ServiceItem>>(
+                      stream: DatabaseService().getServicesStream(),
+                      builder: (context, serviceSnapshot) {
+                        final serviceByName = {
+                          for (final service
+                              in serviceSnapshot.data ?? <ServiceItem>[])
+                            service.name: service,
+                        };
+
+                        if (constraints.maxWidth > 900) {
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: _buildRecentOrdersList(
+                                  context,
+                                  recentOrders,
+                                  serviceByName,
+                                ),
+                              ),
+                              const SizedBox(width: 24),
+                              Expanded(
+                                flex: 1,
+                                child: _buildQuickActions(context),
+                              ),
+                            ],
+                          );
+                        } else {
+                          return Column(
+                            children: [
+                              _buildRecentOrdersList(
+                                context,
+                                recentOrders,
+                                serviceByName,
+                              ),
+                              const SizedBox(height: 24),
+                              _buildQuickActions(context),
+                            ],
+                          );
+                        }
+                      },
+                    );
                   },
                 );
               },
@@ -199,10 +229,7 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Row(
         children: [
           // 左欄：核心營收 (40%) - 深色主題
-          Expanded(
-            flex: 4,
-            child: _buildDynamicRevenueCard(isBento: true),
-          ),
+          Expanded(flex: 4, child: _buildDynamicRevenueCard(isBento: true)),
           const SizedBox(width: 24),
 
           // 中欄：營運重點 (30%)
@@ -210,9 +237,13 @@ class _DashboardPageState extends State<DashboardPage> {
             flex: 3,
             child: Column(
               children: [
-                Expanded(child: _buildTopServiceCard(isBento: true)), // 人氣商品 (高亮)
+                Expanded(
+                  child: _buildTopServiceCard(isBento: true),
+                ), // 人氣商品 (高亮)
                 const SizedBox(height: 24),
-                Expanded(child: _buildWorkshopStatusCard(isBento: true)), // 工廠狀態
+                Expanded(
+                  child: _buildWorkshopStatusCard(isBento: true),
+                ), // 工廠狀態
               ],
             ),
           ),
@@ -223,7 +254,9 @@ class _DashboardPageState extends State<DashboardPage> {
             flex: 3,
             child: Column(
               children: [
-                Expanded(child: _buildOutstandingBalanceCard(isBento: true)), // 欠款
+                Expanded(
+                  child: _buildOutstandingBalanceCard(isBento: true),
+                ), // 欠款
                 const SizedBox(height: 24),
                 Expanded(child: _buildCustomerGrowthCard(isBento: true)), // 客戶
               ],
@@ -239,12 +272,13 @@ class _DashboardPageState extends State<DashboardPage> {
     final range = _getDateRange();
     final start = range.start;
     final end = range.end;
-    
+
     String label;
     if (_revenueFilterMode == 'Custom' && _customDateRange != null) {
-       label = '${DateFormat('MM/dd').format(start)} - ${DateFormat('MM/dd').format(end)}';
+      label =
+          '${DateFormat('MM/dd').format(start)} - ${DateFormat('MM/dd').format(end)}';
     } else {
-       label = 'This $_revenueFilterMode';
+      label = 'This $_revenueFilterMode';
     }
 
     return StreamBuilder<List<Order>>(
@@ -254,13 +288,19 @@ class _DashboardPageState extends State<DashboardPage> {
           stream: DatabaseService().getOrdersByBalanceDateStream(start, end),
           builder: (context, snapshotBalances) {
             String value = '...';
-            String subtext = 'Click menu to filter';
+            String subtext = AppLocalizations.of(context).filterSubtext;
 
             if (snapshotDeposits.hasData && snapshotBalances.hasData) {
               final depositOrders = snapshotDeposits.data!;
               final balanceOrders = snapshotBalances.data!;
-              double totalDeposits = depositOrders.fold(0, (sum, o) => sum + o.deposit);
-              double totalBalances = balanceOrders.fold(0, (sum, o) => sum + o.balancePayment);
+              double totalDeposits = depositOrders.fold(
+                0,
+                (sum, o) => sum + o.deposit,
+              );
+              double totalBalances = balanceOrders.fold(
+                0,
+                (sum, o) => sum + o.balancePayment,
+              );
               double totalCash = totalDeposits + totalBalances;
               value = '\$${totalCash.toStringAsFixed(0)}';
             }
@@ -268,7 +308,9 @@ class _DashboardPageState extends State<DashboardPage> {
             return Stack(
               children: [
                 StatCard(
-                  title: isBento ? 'Total Revenue' : 'Cash Revenue ($label)',
+                  title: isBento
+                      ? AppLocalizations.of(context).totalRevenue
+                      : 'Cash Revenue ($label)',
                   value: value,
                   icon: Icons.paid_outlined, // 更有質感的 Icon
                   trend: subtext,
@@ -281,9 +323,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   top: 4,
                   right: 4,
                   child: PopupMenuButton<String>(
-                    icon: Icon(
-                      Icons.filter_list, 
-                      color: isBento ? Colors.white54 : Colors.grey[600]
+                    icon: IconText(
+                      Icons.filter_list,
+                      color: isBento ? Colors.white54 : Colors.grey[600],
                     ),
                     onSelected: (String choice) {
                       if (choice == 'Custom') {
@@ -292,13 +334,34 @@ class _DashboardPageState extends State<DashboardPage> {
                         setState(() => _revenueFilterMode = choice);
                       }
                     },
-                    itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-                      const PopupMenuItem<String>(value: 'Week', child: Text('This Week')),
-                      const PopupMenuItem<String>(value: 'Month', child: Text('This Month')),
-                      const PopupMenuItem<String>(value: 'Year', child: Text('This Year')),
-                      const PopupMenuDivider(),
-                      const PopupMenuItem<String>(value: 'Custom', child: Text('Custom Range...')),
-                    ],
+                    itemBuilder: (BuildContext context) =>
+                        <PopupMenuEntry<String>>[
+                          PopupMenuItem<String>(
+                            value: 'Week',
+                            child: Text(
+                              AppLocalizations.of(context).filterWeek,
+                            ),
+                          ),
+                          PopupMenuItem<String>(
+                            value: 'Month',
+                            child: Text(
+                              AppLocalizations.of(context).filterMonth,
+                            ),
+                          ),
+                          PopupMenuItem<String>(
+                            value: 'Year',
+                            child: Text(
+                              AppLocalizations.of(context).filterYear,
+                            ),
+                          ),
+                          const PopupMenuDivider(),
+                          PopupMenuItem<String>(
+                            value: 'Custom',
+                            child: Text(
+                              AppLocalizations.of(context).filterCustomRange,
+                            ),
+                          ),
+                        ],
                   ),
                 ),
               ],
@@ -314,7 +377,10 @@ class _DashboardPageState extends State<DashboardPage> {
     final range = _getDateRange();
 
     return StreamBuilder<List<Order>>(
-      stream: DatabaseService().getOrdersByDateRangeStream(range.start, range.end),
+      stream: DatabaseService().getOrdersByDateRangeStream(
+        range.start,
+        range.end,
+      ),
       builder: (context, snapshot) {
         String topItem = 'Calculating...';
         String countText = '';
@@ -328,28 +394,32 @@ class _DashboardPageState extends State<DashboardPage> {
             if (order.status == 'cancelled') continue;
             for (var item in order.items) {
               // 數量分析：加總 Quantity
-              counts[item.service] = (counts[item.service] ?? 0) + item.quantity;
+              counts[item.service] =
+                  (counts[item.service] ?? 0) + item.quantity;
             }
           }
 
           if (counts.isNotEmpty) {
-            var entry = counts.entries.reduce((a, b) => a.value > b.value ? a : b);
+            var entry = counts.entries.reduce(
+              (a, b) => a.value > b.value ? a : b,
+            );
             topItem = entry.key;
-            countText = '${entry.value} units sold';
+            countText =
+                '${entry.value} ${AppLocalizations.of(context).unitsSold}';
             hasData = true;
           } else {
-            topItem = "No Sales";
-            countText = "in this period";
+            topItem = AppLocalizations.of(context).noSales;
+            countText = AppLocalizations.of(context).noPeriod;
           }
         } else if (snapshot.hasData && snapshot.data!.isEmpty) {
-          topItem = "No Data";
-          countText = "in this period";
+          topItem = AppLocalizations.of(context).noSales;
+          countText = AppLocalizations.of(context).noPeriod;
         }
 
         return Stack(
           children: [
             StatCard(
-              title: 'Item Sales Qty',
+              title: AppLocalizations.of(context).itemSalesQty,
               value: topItem,
               icon: Icons.inventory_2_outlined,
               trend: countText,
@@ -357,18 +427,24 @@ class _DashboardPageState extends State<DashboardPage> {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const CostAnalysisPage()),
+                  MaterialPageRoute(
+                    builder: (context) => const CostAnalysisPage(),
+                  ),
                 );
               },
               // Bento 樣式：琥珀金背景
               backgroundColor: isBento ? const Color(0xFFFFB74D) : null,
               textColor: isBento ? Colors.black87 : null,
             ),
-             Positioned(
+            Positioned(
               top: 4,
               right: 4,
               child: PopupMenuButton<String>(
-                icon: Icon(Icons.filter_list, color: isBento ? Colors.black54 : Colors.grey[400], size: 20),
+                icon: IconText(
+                  Icons.filter_list,
+                  color: isBento ? Colors.black54 : Colors.grey[400],
+                  size: 20,
+                ),
                 tooltip: 'Filter Time',
                 onSelected: (String choice) {
                   if (choice == 'Custom') {
@@ -378,11 +454,23 @@ class _DashboardPageState extends State<DashboardPage> {
                   }
                 },
                 itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-                  const PopupMenuItem<String>(value: 'Week', child: Text('This Week')),
-                  const PopupMenuItem<String>(value: 'Month', child: Text('This Month')),
-                  const PopupMenuItem<String>(value: 'Year', child: Text('This Year')),
+                  PopupMenuItem<String>(
+                    value: 'Week',
+                    child: Text(AppLocalizations.of(context).filterWeek),
+                  ),
+                  PopupMenuItem<String>(
+                    value: 'Month',
+                    child: Text(AppLocalizations.of(context).filterMonth),
+                  ),
+                  PopupMenuItem<String>(
+                    value: 'Year',
+                    child: Text(AppLocalizations.of(context).filterYear),
+                  ),
                   const PopupMenuDivider(),
-                  const PopupMenuItem<String>(value: 'Custom', child: Text('Custom Range...')),
+                  PopupMenuItem<String>(
+                    value: 'Custom',
+                    child: Text(AppLocalizations.of(context).filterCustomRange),
+                  ),
                 ],
               ),
             ),
@@ -398,28 +486,35 @@ class _DashboardPageState extends State<DashboardPage> {
       stream: DatabaseService().getWorkshopOrdersStream(isOnGoingOnly: true),
       builder: (context, snapshot) {
         String value = '0';
-        String subtext = 'All clear';
+        String subtext = AppLocalizations.of(context).allClear;
 
         if (snapshot.hasData) {
           final tasks = snapshot.data!;
-          final activeTasks = tasks.where((t) => t.status != WorkshopStatus.completed).length;
-          final urgentTasks = tasks.where((t) => t.status != WorkshopStatus.completed && t.priority == 'urgent').length;
+          final activeTasks = tasks
+              .where((t) => t.status != WorkshopStatus.completed)
+              .length;
+          final urgentTasks = tasks
+              .where(
+                (t) =>
+                    t.status != WorkshopStatus.completed &&
+                    t.priority == 'urgent',
+              )
+              .length;
 
           value = activeTasks.toString();
-          subtext = urgentTasks > 0 ? '$urgentTasks urgent tasks!' : 'In production';
+          subtext = urgentTasks > 0
+              ? '$urgentTasks ${AppLocalizations.of(context).urgentTasks}'
+              : AppLocalizations.of(context).inProduction;
         }
 
         return StatCard(
-          title: 'Active Jobs',
+          title: AppLocalizations.of(context).activeJobs,
           value: value,
           icon: Icons.cut,
           trend: subtext,
           trendUp: false,
           onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const WorkshopPage(initialScrollIndex: 0)),
-            );
+            Navigator.pushReplacementNamed(context, '/workshop');
           },
           // Bento 樣式：淺藍背景，深青文字
           backgroundColor: isBento ? const Color(0xFFE0F7FA) : null,
@@ -435,7 +530,7 @@ class _DashboardPageState extends State<DashboardPage> {
       stream: DatabaseService().getOrdersStream(isIncompleteOnly: true),
       builder: (context, snapshot) {
         String value = '\$0';
-        String subtext = 'All paid';
+        String subtext = AppLocalizations.of(context).allPaid;
         bool hasDebt = false;
 
         if (snapshot.hasData) {
@@ -445,13 +540,14 @@ class _DashboardPageState extends State<DashboardPage> {
 
           value = '\$${totalDebt.toStringAsFixed(0)}';
           if (unpaidOrders.isNotEmpty) {
-            subtext = '${unpaidOrders.length} unpaid orders';
+            subtext =
+                '${unpaidOrders.length} ${AppLocalizations.of(context).unpaidOrders}';
             hasDebt = true;
           }
         }
 
         return StatCard(
-          title: 'Outstanding',
+          title: AppLocalizations.of(context).outstanding,
           value: value,
           icon: Icons.money_off_csred_outlined,
           trend: subtext,
@@ -459,7 +555,10 @@ class _DashboardPageState extends State<DashboardPage> {
           onTap: () {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const OrdersPage(showOutstandingOnly: true)),
+              MaterialPageRoute(
+                builder: (context) =>
+                    const OrdersPage(showOutstandingOnly: true),
+              ),
             );
           },
           // Bento 樣式：淺紅背景，深紅文字
@@ -480,10 +579,10 @@ class _DashboardPageState extends State<DashboardPage> {
           value = snapshot.data!.length.toString();
         }
         return StatCard(
-          title: 'Total Customers',
+          title: AppLocalizations.of(context).totalCustomers,
           value: value,
           icon: Icons.people_outline,
-          trend: 'Lifetime clients',
+          trend: AppLocalizations.of(context).lifetimeClients,
           trendUp: true,
           onTap: () {
             Navigator.push(
@@ -500,7 +599,11 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   // === 列表與按鈕區塊 ===
-  Widget _buildRecentOrdersList(BuildContext context, List<Order> orders) {
+  Widget _buildRecentOrdersList(
+    BuildContext context,
+    List<Order> orders,
+    Map<String, ServiceItem> serviceByName,
+  ) {
     return Card(
       elevation: 2,
       child: Padding(
@@ -511,31 +614,43 @@ class _DashboardPageState extends State<DashboardPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Recent Orders',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                Text(
+                  AppLocalizations.of(context).recentOrders,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 TextButton(
-                  onPressed: () => Navigator.pushReplacementNamed(context, '/orders'),
-                  child: const Text('View All'),
+                  onPressed: () =>
+                      Navigator.pushReplacementNamed(context, '/orders'),
+                  child: Text(AppLocalizations.of(context).viewAll),
                 ),
               ],
             ),
             const SizedBox(height: 16),
             if (orders.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 20),
-                child: Center(child: Text('No orders yet')),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                child: Center(
+                  child: Text(AppLocalizations.of(context).noOrdersYet),
+                ),
               )
             else
-              ...orders.map((order) => _buildOrderItem(order)),
+              ...orders.map((order) => _buildOrderItem(order, serviceByName)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildOrderItem(Order order) {
+  Widget _buildOrderItem(Order order, Map<String, ServiceItem> serviceByName) {
+    final syncedOrder = order.items.isNotEmpty
+        ? CostCalculationService.syncOrderWithServicePrices(
+            order,
+            serviceByName: serviceByName,
+          )
+        : order;
     Color statusColor = Colors.grey;
     Color statusBg = Colors.grey[100]!;
 
@@ -568,7 +683,10 @@ class _DashboardPageState extends State<DashboardPage> {
               color: Colors.blue[50],
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(Icons.shopping_bag_outlined, color: Colors.blue),
+            child: const IconText(
+              Icons.shopping_bag_outlined,
+              color: Colors.blue,
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -577,11 +695,19 @@ class _DashboardPageState extends State<DashboardPage> {
               children: [
                 Text(
                   order.customerName,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
                 ),
                 Text(
                   order.items.isNotEmpty ? order.items.first.service : 'Order',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                  style: TextStyle(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.7),
+                    fontSize: 14,
+                  ),
                 ),
               ],
             ),
@@ -590,8 +716,11 @@ class _DashboardPageState extends State<DashboardPage> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '\$${order.total.toStringAsFixed(0)}',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                '\$${syncedOrder.total.toStringAsFixed(0)}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
               ),
               const SizedBox(height: 4),
               Container(
@@ -602,7 +731,11 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
                 child: Text(
                   order.status.toUpperCase(),
-                  style: TextStyle(fontSize: 10, color: statusColor, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: statusColor,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
@@ -627,7 +760,7 @@ class _DashboardPageState extends State<DashboardPage> {
             const SizedBox(height: 16),
             _buildActionButton(
               context,
-              'New Order',
+              AppLocalizations.of(context).newOrder,
               Icons.add_shopping_cart,
               Colors.blue,
               () => Navigator.pushReplacementNamed(context, '/pos'),
@@ -635,7 +768,7 @@ class _DashboardPageState extends State<DashboardPage> {
             const SizedBox(height: 12),
             _buildActionButton(
               context,
-              'Add Customer',
+              AppLocalizations.of(context).addCustomerAction,
               Icons.person_add,
               Colors.green,
               () => Navigator.pushReplacementNamed(context, '/customers'),
@@ -643,7 +776,7 @@ class _DashboardPageState extends State<DashboardPage> {
             const SizedBox(height: 12),
             _buildActionButton(
               context,
-              'Check Workshop',
+              AppLocalizations.of(context).checkWorkshop,
               Icons.cut,
               Colors.orange,
               () => Navigator.pushReplacementNamed(context, '/workshop'),
@@ -651,13 +784,15 @@ class _DashboardPageState extends State<DashboardPage> {
             const SizedBox(height: 12),
             _buildActionButton(
               context,
-              'Cost Analysis',
+              AppLocalizations.of(context).costAnalysis,
               Icons.analytics_outlined,
               Colors.purple,
               () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const CostAnalysisPage()),
+                  MaterialPageRoute(
+                    builder: (context) => const CostAnalysisPage(),
+                  ),
                 );
               },
             ),
@@ -678,10 +813,10 @@ class _DashboardPageState extends State<DashboardPage> {
       width: double.infinity,
       child: ElevatedButton.icon(
         onPressed: onTap,
-        icon: Icon(icon, size: 20),
+        icon: IconText(icon, size: 20),
         label: Text(label),
         style: ElevatedButton.styleFrom(
-          backgroundColor: color.withOpacity(0.1),
+          backgroundColor: color.withValues(alpha: 0.1),
           foregroundColor: color,
           elevation: 0,
           alignment: Alignment.centerLeft,

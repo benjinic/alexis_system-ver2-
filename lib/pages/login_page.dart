@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../components/icon_text.dart';
+import '../l10n/app_localizations.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class LoginPage extends StatefulWidget {
@@ -15,6 +17,8 @@ class _LoginPageState extends State<LoginPage> {
   String? _errorMessage;
 
   Future<void> _login() async {
+    final l10n = AppLocalizations.of(context);
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -27,23 +31,25 @@ class _LoginPageState extends State<LoginPage> {
       );
       // 登入成功後，main.dart 的 StreamBuilder 會自動切換頁面，這裡不需要手動跳轉
     } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
       setState(() {
         switch (e.code) {
           case 'user-not-found':
-            _errorMessage = 'No user found with this email.';
+            _errorMessage = l10n.userNotFound;
             break;
           case 'wrong-password':
-            _errorMessage = 'Incorrect password.';
+            _errorMessage = l10n.incorrectPassword;
             break;
           case 'invalid-email':
-            _errorMessage = 'Invalid email format.';
+            _errorMessage = l10n.invalidEmail;
             break;
           default:
-            _errorMessage = 'Login failed: ${e.message}';
+            _errorMessage = '${l10n.loginFailed}: ${e.message}';
         }
       });
     } catch (e) {
-      setState(() => _errorMessage = 'An unexpected error occurred.');
+      if (!mounted) return;
+      setState(() => _errorMessage = l10n.unexpectedError);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -58,6 +64,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       backgroundColor: Colors.grey[100],
       body: Center(
@@ -74,7 +81,11 @@ class _LoginPageState extends State<LoginPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Logo 或標題
-                const Icon(Icons.checkroom, size: 64, color: Colors.blueGrey),
+                const IconText(
+                  Icons.checkroom,
+                  size: 64,
+                  color: Colors.blueGrey,
+                ),
                 const SizedBox(height: 16),
                 const Text(
                   'ALEXIS SYSTEM',
@@ -85,7 +96,14 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                Text('Staff Login', style: TextStyle(color: Colors.grey[600])),
+                Text(
+                  l10n.staffLogin,
+                  style: TextStyle(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.7),
+                  ),
+                ),
                 const SizedBox(height: 32),
 
                 // 錯誤訊息顯示
@@ -100,7 +118,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     child: Row(
                       children: [
-                        Icon(
+                        IconText(
                           Icons.error_outline,
                           size: 20,
                           color: Colors.red[700],
@@ -122,20 +140,20 @@ class _LoginPageState extends State<LoginPage> {
                 // 輸入框
                 TextField(
                   controller: _emailController,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Email',
-                    prefixIcon: Icon(Icons.email_outlined),
-                    border: OutlineInputBorder(),
+                    prefixIcon: const IconText(Icons.email_outlined),
+                    border: const OutlineInputBorder(),
                   ),
                   keyboardType: TextInputType.emailAddress,
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: _passwordController,
-                  decoration: const InputDecoration(
-                    labelText: 'Password',
-                    prefixIcon: Icon(Icons.lock_outline),
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: l10n.passwordLabel,
+                    prefixIcon: const IconText(Icons.lock_outline),
+                    border: const OutlineInputBorder(),
                   ),
                   obscureText: true,
                   onSubmitted: (_) => _login(), // 按 Enter 直接登入
@@ -161,7 +179,7 @@ class _LoginPageState extends State<LoginPage> {
                               color: Colors.white,
                             ),
                           )
-                        : const Text('LOGIN'),
+                        : Text(l10n.loginButton),
                   ),
                 ),
               ],

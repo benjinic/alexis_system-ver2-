@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'icon_text.dart';
+import '../l10n/app_localizations.dart';
 
 class Navigation extends StatelessWidget {
   final String currentRoute;
@@ -8,7 +10,7 @@ class Navigation extends StatelessWidget {
   void onDestinationSelected(BuildContext context, int index) {
     switch (index) {
       case 0:
-        Navigator.of(context).pushReplacementNamed('/');
+        Navigator.of(context).pushReplacementNamed('/dashboard');
         break;
       case 1:
         Navigator.of(context).pushReplacementNamed('/pos');
@@ -33,46 +35,54 @@ class Navigation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return NavigationRail(
       selectedIndex: _getSelectedIndex(currentRoute),
       onDestinationSelected: (index) => onDestinationSelected(context, index),
       labelType: NavigationRailLabelType.all,
       // 定義側邊欄的項目
-      destinations: const [
+      destinations: [
+        // 1. Dashboard (儀表板) -> 儀表板風格
         NavigationRailDestination(
-          icon: Icon(Icons.dashboard_outlined),
-          selectedIcon: Icon(Icons.dashboard),
-          label: Text('Dashboard'),
+          icon: const IconText(Icons.dashboard_outlined),
+          selectedIcon: const IconText(Icons.dashboard),
+          label: Text(l10n.navDashboard),
         ),
+        // 2. POS (收銀) -> 購物車結算
         NavigationRailDestination(
-          icon: Icon(Icons.point_of_sale_outlined),
-          selectedIcon: Icon(Icons.point_of_sale),
-          label: Text('POS'),
+          icon: const IconText(Icons.shopping_cart_outlined),
+          selectedIcon: const IconText(Icons.shopping_cart),
+          label: Text(l10n.navPOS),
         ),
+        // 3. Orders (訂單) -> 收據風格
         NavigationRailDestination(
-          icon: Icon(Icons.receipt_long_outlined),
-          selectedIcon: Icon(Icons.receipt_long),
-          label: Text('Orders'),
+          icon: const IconText(Icons.receipt_long_outlined),
+          selectedIcon: const IconText(Icons.receipt_long),
+          label: Text(l10n.navOrders),
         ),
+        // 4. Customers (客戶) -> 個人客戶風格
         NavigationRailDestination(
-          icon: Icon(Icons.people_outline),
-          selectedIcon: Icon(Icons.people),
-          label: Text('Customers'),
+          icon: const IconText(Icons.person_outlined),
+          selectedIcon: const IconText(Icons.person),
+          label: Text(l10n.navClients),
         ),
+        // 5. Fabric (布料/庫存) -> 分類管理
         NavigationRailDestination(
-          icon: Icon(Icons.inventory_2_outlined),
-          selectedIcon: Icon(Icons.inventory_2),
-          label: Text('Fabric'),
+          icon: const IconText(Icons.category_outlined),
+          selectedIcon: const IconText(Icons.category),
+          label: Text(l10n.navFabric),
         ),
+        // 6. Workshop (工廠) -> 工坊製作
         NavigationRailDestination(
-          icon: Icon(Icons.cut_outlined),
-          selectedIcon: Icon(Icons.cut),
-          label: Text('Workshop'),
+          icon: const IconText(Icons.engineering_outlined),
+          selectedIcon: const IconText(Icons.engineering),
+          label: Text(l10n.navShop),
         ),
+        // 7. Settings (設定) -> 標準設定
         NavigationRailDestination(
-          icon: Icon(Icons.settings_outlined),
-          selectedIcon: Icon(Icons.settings),
-          label: Text('Settings'),
+          icon: const IconText(Icons.settings_outlined),
+          selectedIcon: const IconText(Icons.settings),
+          label: Text(l10n.navSettings),
         ),
       ],
     );
@@ -80,7 +90,7 @@ class Navigation extends StatelessWidget {
 
   int _getSelectedIndex(String route) {
     switch (route) {
-      case '/':
+      case '/dashboard':
         return 0;
       case '/pos':
         return 1;

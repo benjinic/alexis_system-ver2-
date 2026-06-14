@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'icon_text.dart';
 import 'package:intl/intl.dart';
 import '../models/workshop_order.dart';
 import '../models/workshop_status.dart';
@@ -9,6 +10,7 @@ class WorkshopCard extends StatelessWidget {
   final VoidCallback? onArchive;
   final VoidCallback? onEdit;
   final VoidCallback? onNextStage;
+  final VoidCallback? onPrint;
   final VoidCallback? onFabricToggle;
 
   const WorkshopCard({
@@ -18,107 +20,317 @@ class WorkshopCard extends StatelessWidget {
     this.onArchive,
     this.onEdit,
     this.onNextStage,
+    this.onPrint,
     this.onFabricToggle,
   });
 
   @override
   Widget build(BuildContext context) {
-    // 狀態判斷
     final bool isUrgent = order.priority == 'urgent';
     final bool isCompleted = order.status == WorkshopStatus.completed;
+    final bool isArchived = order.status == WorkshopStatus.archived;
+    final now = DateTime.now();
+    final isOverdue = !isCompleted && !isArchived && now.isAfter(order.dueDate);
+    final isDueSoon =
+        !isCompleted &&
+        !isArchived &&
+        !isOverdue &&
+        order.dueDate.difference(now).inDays <= 3;
+    final daysLeft = order.dueDate.difference(now).inDays;
 
-    // 顏色邏輯：急件=紅，完成=綠，一般=藍，封存=灰
+    // 顏色邏輯 (含到期日警示)
     Color cardColor;
-    if (order.status == WorkshopStatus.archived) {
+    if (isArchived) {
       cardColor = Colors.grey;
     } else if (isCompleted) {
       cardColor = Colors.green;
-    } else if (isUrgent) {
+    } else if (isUrgent || isOverdue) {
       cardColor = Colors.red;
+    } else if (isDueSoon) {
+      cardColor = Colors.orange;
     } else {
-      cardColor = Colors.blue.shade700;
+      cardColor = Colors.blue.shade600;
     }
 
     return Card(
-      elevation: 4, // 增加陰影，更有立體感
-      margin: const EdgeInsets.only(bottom: 16), // 卡片間距加大
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 2, // 降低一點陰影，看起來更現代扁平
+      margin: const EdgeInsets.only(bottom: 12), // 縮小卡片間距
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      clipBehavior: Clip.antiAlias, // 確保左側顏色條不會溢出圓角
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
         child: Container(
-          // 加上左側顏色條 (Color Bar)
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
             border: Border(
-              left: BorderSide(color: cardColor, width: 12), // 左側粗邊框顏色提示
+              left: BorderSide(color: cardColor, width: 8), // 顏色條稍微改細一點，更精緻
             ),
           ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 1. 第一行：單號 (大字) + 急件標籤
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '#${order.orderId}',
-                      style: const TextStyle(
-                        fontSize: 20, // 單號加大
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black54,
-                      ),
-                    ),
-                    if (isUrgent)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.red,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Text(
-                          '急件 URGENT',
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // === 1. 頂部：單號 + 狀態標籤 + 彈出選單 ===
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '#${order.orderId}',
                           style: TextStyle(
-                            color: Colors.white,
+                            fontSize: 14,
                             fontWeight: FontWeight.bold,
-                            fontSize: 16, // 標籤字體加大
+                            color: Colors.grey[600],
+                            letterSpacing: 0.5,
                           ),
                         ),
-                      ),
-                  ],
-                ),
-
-                const SizedBox(height: 12),
-
-                // 2. 第二行：客人名稱 (超大字)
-                Text(
-                  order.customer,
-                  style: const TextStyle(
-                    fontSize: 26, // 名字超大，方便老花眼
-                    fontWeight: FontWeight.w900,
-                    color: Colors.black87,
+                        const SizedBox(height: 4),
+                        // 縮小版的客人名稱
+                        Text(
+                          order.customer,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.black87,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
+
+                  // 右上角區域：急件標籤 + 選單按鈕
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // 急件標籤 (實色，更醒目)
+                      if (isUrgent)
+                        Container(
+                          margin: const EdgeInsets.only(right: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconText(
+                                Icons.local_fire_department,
+                                size: 13,
+                                color: Colors.white,
+                              ),
+                              SizedBox(width: 3),
+                              Text(
+                                'URGENT',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      // 逾期標籤 (非急件但已逾期)
+                      if (!isUrgent && isOverdue)
+                        Container(
+                          margin: const EdgeInsets.only(right: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade700,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconText(
+                                Icons.warning_rounded,
+                                size: 13,
+                                color: Colors.white,
+                              ),
+                              SizedBox(width: 3),
+                              Text(
+                                'OVERDUE',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      // 即將到期標籤 (3 天內)
+                      if (!isUrgent && !isOverdue && isDueSoon)
+                        Container(
+                          margin: const EdgeInsets.only(right: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.orange,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const IconText(
+                                Icons.schedule,
+                                size: 13,
+                                color: Colors.white,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                daysLeft == 0 ? 'TODAY' : '${daysLeft}D LEFT',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                      // === 隱藏式功能選單 (Popup Menu) ===
+                      PopupMenuButton<String>(
+                        icon: const IconText(
+                          Icons.more_vert,
+                          color: Colors.grey,
+                        ),
+                        tooltip: 'Actions',
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        onSelected: (value) {
+                          if (value == 'edit' && onEdit != null) {
+                            onEdit!();
+                          }
+                          if (value == 'next' && onNextStage != null) {
+                            onNextStage!();
+                          }
+                          if (value == 'print' && onPrint != null) {
+                            onPrint!();
+                          }
+                          if (value == 'archive' && onArchive != null) {
+                            onArchive!();
+                          }
+                        },
+                        itemBuilder: (BuildContext context) => [
+                          if (!isCompleted && onNextStage != null)
+                            PopupMenuItem(
+                              value: 'next',
+                              child: Row(
+                                children: [
+                                  IconText(
+                                    Icons.arrow_forward,
+                                    color: Theme.of(context).primaryColor,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Move to Next Stage',
+                                    style: TextStyle(
+                                      color: Theme.of(context).primaryColor,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          const PopupMenuItem(
+                            value: 'edit',
+                            child: Row(
+                              children: [
+                                IconText(Icons.edit_outlined, size: 20),
+                                SizedBox(width: 12),
+                                Text('Edit Details'),
+                              ],
+                            ),
+                          ),
+                          if (onPrint != null)
+                            const PopupMenuItem(
+                              value: 'print',
+                              child: Row(
+                                children: [
+                                  IconText(Icons.print_outlined, size: 20),
+                                  SizedBox(width: 12),
+                                  Text('Print Job Ticket'),
+                                ],
+                              ),
+                            ),
+                          if (isCompleted && onArchive != null)
+                            const PopupMenuDivider(),
+                          if (isCompleted && onArchive != null)
+                            PopupMenuItem(
+                              value: 'archive',
+                              child: Row(
+                                children: [
+                                  IconText(
+                                    Icons.archive_outlined,
+                                    color: Colors.grey[700],
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Archive Order',
+                                    style: TextStyle(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurface
+                                          .withValues(alpha: 0.8),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              // === 2. 中間：款式資訊 ===
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.grey[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade200),
                 ),
-
-                const SizedBox(height: 8),
-
-                // 3. 第三行：款式與布料 (大字)
-                Row(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.checkroom, size: 28, color: Colors.grey[700]),
+                    IconText(
+                      Icons.checkroom,
+                      size: 18,
+                      color: Colors.grey[600],
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         order.item,
-                        style: const TextStyle(
-                          fontSize: 20, // 內容加大
-                          fontWeight: FontWeight.w500,
-                          height: 1.3,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[800],
+                          height: 1.4,
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -126,169 +338,158 @@ class WorkshopCard extends StatelessWidget {
                     ),
                   ],
                 ),
+              ),
 
-                const SizedBox(height: 8),
+              const SizedBox(height: 10),
 
-                // 4. 第四行：交貨日期 (圖示+文字)
-                Row(
-                  children: [
-                    Icon(
-                      Icons.calendar_today,
-                      size: 24,
-                      color: Colors.blueGrey,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '交貨: ${DateFormat('MM月dd日').format(order.dueDate)}',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: DateTime.now().isAfter(order.dueDate)
-                            ? Colors.red
-                            : Colors.blueGrey,
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 8),
-
-                InkWell(
-                  onTap: onFabricToggle,
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: order.isFabricOrdered
-                          ? Colors.green.withOpacity(0.10)
-                          : Colors.orange.withOpacity(0.10),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: order.isFabricOrdered
-                            ? Colors.green.withOpacity(0.35)
-                            : Colors.orange.withOpacity(0.35),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          order.isFabricOrdered
-                              ? Icons.check_circle_outline
-                              : Icons.local_shipping_outlined,
-                          size: 18,
-                          color: order.isFabricOrdered
-                              ? Colors.green[700]
-                              : Colors.orange[800],
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          order.isFabricOrdered ? '布料已訂購' : '布料待訂購',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: order.isFabricOrdered
-                                ? Colors.green[700]
-                                : Colors.orange[800],
-                          ),
-                        ),
-                      ],
+              // === 3. 底部：交期 + 布料狀態 + 快速推進按鈕 ===
+              Row(
+                children: [
+                  // 交期
+                  IconText(
+                    isOverdue ? Icons.warning_rounded : Icons.calendar_today,
+                    size: 14,
+                    color: isOverdue
+                        ? Colors.red
+                        : (isDueSoon ? Colors.orange : Colors.grey[600]),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    DateFormat('MMM dd').format(order.dueDate),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: isOverdue
+                          ? Colors.red
+                          : (isDueSoon
+                                ? Colors.orange[800]!
+                                : Colors.grey[700]!),
                     ),
                   ),
-                ),
-
-                const SizedBox(height: 20),
-                const Divider(thickness: 1.5), // 分隔線加粗
-                const SizedBox(height: 12),
-
-                // 5. 底部：超大操作按鈕
-                Row(
-                  children: [
-                    // 修改按鈕
-                    Expanded(
-                      child: SizedBox(
-                        height: 50, // 按鈕加高
-                        child: OutlinedButton.icon(
-                          onPressed: onEdit,
-                          icon: const Icon(Icons.edit, size: 28),
-                          label: const Text(
-                            '修改',
-                            style: TextStyle(fontSize: 18),
+                  const SizedBox(width: 10),
+                  // 布料訂購狀態
+                  GestureDetector(
+                    onTap: onFabricToggle,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: order.isFabricOrdered
+                            ? Colors.green.withValues(alpha: 0.12)
+                            : Colors.grey.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: order.isFabricOrdered
+                              ? Colors.green.withValues(alpha: 0.4)
+                              : Colors.grey.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.content_cut,
+                            size: 11,
+                            color: order.isFabricOrdered
+                                ? Colors.green
+                                : Colors.grey[500],
                           ),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(
-                              width: 2,
-                              color: Colors.grey,
+                          const SizedBox(width: 3),
+                          Text(
+                            order.isFabricOrdered ? '已訂' : '未訂',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: order.isFabricOrdered
+                                  ? Colors.green
+                                  : Colors.grey[500],
                             ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
-
-                    const SizedBox(width: 12),
-
-                    // 下一步/完成按鈕
-                    if (!isCompleted && onNextStage != null)
-                      Expanded(
-                        flex: 2, // 讓這個按鈕寬度是修改的兩倍
-                        child: SizedBox(
-                          height: 50,
-                          child: ElevatedButton.icon(
-                            onPressed: onNextStage,
-                            icon: const Icon(
-                              Icons.arrow_forward,
-                              size: 28,
-                              color: Colors.white,
-                            ),
-                            label: const Text(
-                              '下一步 / 完成',
+                  ),
+                  const Spacer(),
+                  // 快速推進狀態按鈕
+                  if (onNextStage != null && !isCompleted && !isArchived)
+                    GestureDetector(
+                      onTap: onNextStage,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: cardColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: cardColor.withValues(alpha: 0.4),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              order.status.next?.label ?? '',
                               style: TextStyle(
-                                fontSize: 18,
-                                color: Colors.white,
+                                fontSize: 10,
                                 fontWeight: FontWeight.bold,
+                                color: cardColor,
                               ),
                             ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Theme.of(context).primaryColor,
-                              elevation: 2,
+                            const SizedBox(width: 3),
+                            Icon(
+                              Icons.arrow_forward,
+                              size: 11,
+                              color: cardColor,
                             ),
-                          ),
+                          ],
                         ),
                       ),
+                    )
+                  else
+                    Text(
+                      order.status.label.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: cardColor,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                ],
+              ),
 
-                    // 封存按鈕 (僅在完成時顯示)
-                    if (isCompleted && onArchive != null)
-                      Expanded(
-                        flex: 2,
-                        child: SizedBox(
-                          height: 50,
-                          child: ElevatedButton.icon(
-                            onPressed: onArchive,
-                            icon: const Icon(
-                              Icons.archive,
-                              size: 28,
-                              color: Colors.white,
-                            ),
-                            label: const Text(
-                              '封存訂單',
-                              style: TextStyle(
-                                fontSize: 18,
-                                color: Colors.white,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.grey[700],
-                            ),
-                          ),
-                        ),
+              const SizedBox(height: 8),
+
+              // === 4. 進度條 ===
+              Row(
+                children: [
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: order.progress / 100.0,
+                        backgroundColor: Colors.grey[200],
+                        color: isCompleted ? Colors.green : cardColor,
+                        minHeight: 5,
                       ),
-                  ],
-                ),
-              ],
-            ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${order.progress}%',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[500],
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'icon_text.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -15,11 +16,7 @@ class OrderItemDialog extends StatefulWidget {
   final OrderItem? existingItem;
   final int? index;
 
-  const OrderItemDialog({
-    super.key,
-    this.existingItem,
-    this.index,
-  });
+  const OrderItemDialog({super.key, this.existingItem, this.index});
 
   @override
   State<OrderItemDialog> createState() => _OrderItemDialogState();
@@ -32,7 +29,8 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
   late TextEditingController _priceController;
   late TextEditingController _usageController;
   late TextEditingController _quantityController;
-  final TextEditingController _suggestedPriceController = TextEditingController();
+  final TextEditingController _suggestedPriceController =
+      TextEditingController();
   final TextEditingController _fabricSearchController = TextEditingController();
 
   // State
@@ -54,11 +52,14 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
 
   void _initializeControllers() {
     _priceController = TextEditingController(
-        text: widget.existingItem?.price.toStringAsFixed(0) ?? '');
+      text: widget.existingItem?.price.toStringAsFixed(0) ?? '',
+    );
     _usageController = TextEditingController(
-        text: widget.existingItem?.fabricUsed.toString() ?? '0');
+      text: widget.existingItem?.fabricUsed.toString() ?? '0',
+    );
     _quantityController = TextEditingController(
-        text: widget.existingItem?.quantity.toString() ?? '1');
+      text: widget.existingItem?.quantity.toString() ?? '1',
+    );
     _isManualPriceEdited = widget.existingItem?.manualUnitPrice ?? false;
   }
 
@@ -66,7 +67,7 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
     try {
       // 讀取布料庫存
       final fabrics = await _dbService.getInventory();
-      
+
       if (mounted) {
         setState(() {
           _fabrics = fabrics;
@@ -74,13 +75,17 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
         });
 
         // 如果是編輯模式，嘗試還原已選布料
-        if (widget.existingItem != null && widget.existingItem!.fabricId != null) {
+        if (widget.existingItem != null &&
+            widget.existingItem!.fabricId != null) {
           try {
-            _selectedFabric = _fabrics.firstWhere((f) => f.id == widget.existingItem!.fabricId);
+            _selectedFabric = _fabrics.firstWhere(
+              (f) => f.id == widget.existingItem!.fabricId,
+            );
             _calculateValues();
             // Set category based on existing fabric
             if (_selectedFabric != null) {
-              _selectedCategory = _fabricCategories.contains(_selectedFabric!.category)
+              _selectedCategory =
+                  _fabricCategories.contains(_selectedFabric!.category)
                   ? _selectedFabric!.category
                   : 'Other';
             }
@@ -91,7 +96,7 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
       if (mounted) {
         setState(() => _isLoadingFabrics = false);
       }
-      print('Error loading fabrics: $e');
+      debugPrint('Error loading fabrics: $e');
     }
   }
 
@@ -113,16 +118,11 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
       double currentUsage = double.tryParse(_usageController.text) ?? 0.0;
 
       double totalFabricCost = fabricUnitCost * currentUsage;
-      
+
       // 公式：(服務費 + 布料總成本) * 2.5
       double suggestedPrice = (servicePrice + totalFabricCost) * 2.5;
 
       _suggestedPriceController.text = suggestedPrice.toStringAsFixed(0);
-
-      // 如果仍未手動改價，才自動填入建議價
-      if (!_isManualPriceEdited && _priceController.text.isEmpty) {
-        _priceController.text = suggestedPrice.toStringAsFixed(0);
-      }
     }
   }
 
@@ -139,7 +139,7 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
     final int finalQty = int.tryParse(_quantityController.text) ?? 1;
     final bool manualUnitPrice =
         _isManualPriceEdited || (finalPrice - servicePrice).abs() > 0.001;
-    
+
     // 計算預估成本 (僅布料)
     double estimatedMaterialCost = 0;
     if (_selectedService != null && _selectedFabric != null) {
@@ -147,7 +147,9 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
     }
 
     final newItem = OrderItem(
-      id: widget.existingItem?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+      id:
+          widget.existingItem?.id ??
+          DateTime.now().millisecondsSinceEpoch.toString(),
       service: _selectedService!.name,
       price: finalPrice,
       quantity: finalQty,
@@ -165,7 +167,7 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
     } else {
       context.read<CartProvider>().addItem(newItem);
     }
-    
+
     Navigator.pop(context);
   }
 
@@ -212,9 +214,8 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                   ),
                   inputFormatters: [
                     TextInputFormatter.withFunction(
-                      (oldValue, newValue) => newValue.copyWith(
-                        text: newValue.text.toUpperCase(),
-                      ),
+                      (oldValue, newValue) =>
+                          newValue.copyWith(text: newValue.text.toUpperCase()),
                     ),
                   ],
                 ),
@@ -255,10 +256,7 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                         ),
                         items: unitOptions
                             .map(
-                              (u) => DropdownMenuItem(
-                                value: u,
-                                child: Text(u),
-                              ),
+                              (u) => DropdownMenuItem(value: u, child: Text(u)),
                             )
                             .toList(),
                         onChanged: (value) {
@@ -291,9 +289,7 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                     border: OutlineInputBorder(),
                   ),
                   items: _fabricCategories
-                      .map(
-                        (c) => DropdownMenuItem(value: c, child: Text(c)),
-                      )
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                       .toList(),
                   onChanged: (value) {
                     if (value != null) {
@@ -474,15 +470,19 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
     final fabricSearchQuery = _fabricSearchController.text.toLowerCase();
     final filteredFabrics = _fabrics.where((f) {
       final bool matchCategory = f.category == _selectedCategory;
-      final bool matchSearch = f.name.toLowerCase().contains(fabricSearchQuery) ||
+      final bool matchSearch =
+          f.name.toLowerCase().contains(fabricSearchQuery) ||
           f.id.toLowerCase().contains(fabricSearchQuery);
       return matchCategory && matchSearch;
     }).toList();
 
     return AlertDialog(
       title: Text(widget.existingItem != null ? 'Edit Item' : 'Add Item'),
-      content: _isLoadingFabrics 
-          ? const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()))
+      content: _isLoadingFabrics
+          ? const SizedBox(
+              height: 200,
+              child: Center(child: CircularProgressIndicator()),
+            )
           : SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -493,47 +493,78 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                     stream: _dbService.getServicesStream(),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: Padding(padding: EdgeInsets.all(8.0), child: CircularProgressIndicator()));
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(8.0),
+                            child: CircularProgressIndicator(),
+                          ),
+                        );
                       }
-                      
+
                       final allServices = snapshot.data ?? [];
 
                       // 自動還原編輯項目 (僅執行一次)
-                      if (widget.existingItem != null && _selectedService == null && allServices.isNotEmpty) {
-                         try {
-                           final foundService = allServices.firstWhere((s) => s.name == widget.existingItem!.service);
-                           // 這裡使用 Future.microtask 避免在 build 期間 setState
-                           Future.microtask(() {
-                             if (mounted && _selectedService == null) {
-                               setState(() {
-                                 _selectedService = foundService;
-                               });
-                               _calculateValues();
-                             }
-                           });
-                         } catch (_) {}
+                      if (widget.existingItem != null &&
+                          _selectedService == null &&
+                          allServices.isNotEmpty) {
+                        try {
+                          final foundService = allServices.firstWhere(
+                            (s) => s.name == widget.existingItem!.service,
+                          );
+                          // 這裡使用 Future.microtask 避免在 build 期間 setState
+                          Future.microtask(() {
+                            if (mounted && _selectedService == null) {
+                              setState(() {
+                                _selectedService = foundService;
+                                if (!_isManualPriceEdited ||
+                                    _priceController.text.trim().isEmpty) {
+                                  _priceController.text = foundService.price
+                                      .toStringAsFixed(0);
+                                }
+                              });
+                              _calculateValues();
+                            }
+                          });
+                        } catch (_) {}
                       }
 
-                      if (allServices.isEmpty) return const Text('No services found.');
+                      if (allServices.isEmpty) {
+                        return const Text('No services found.');
+                      }
 
                       return ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 200), 
+                        constraints: const BoxConstraints(maxHeight: 200),
                         child: SingleChildScrollView(
                           child: Wrap(
                             spacing: 8.0,
                             runSpacing: 8.0,
                             children: allServices.map((service) {
-                              final isSelected = _selectedService?.id == service.id;
+                              final isSelected =
+                                  _selectedService?.id == service.id;
                               return ChoiceChip(
-                                label: Text('${service.name}'),
+                                label: Text(service.name),
                                 selected: isSelected,
                                 onSelected: (selected) {
                                   setState(() {
-                                    _selectedService = selected ? service : null;
+                                    _selectedService = selected
+                                        ? service
+                                        : null;
                                     if (selected) {
-                                      if (_usageController.text == '0') _usageController.text = service.defaultFabricUsage.toString();
-                                      if (service.defaultFabricUsage == 0) _selectedFabric = null;
-                                      if (widget.existingItem == null) _priceController.clear();
+                                      if (_usageController.text == '0') {
+                                        _usageController.text = service
+                                            .defaultFabricUsage
+                                            .toString();
+                                      }
+                                      if (service.defaultFabricUsage == 0) {
+                                        _selectedFabric = null;
+                                      }
+                                      if (!_isManualPriceEdited ||
+                                          _priceController.text
+                                              .trim()
+                                              .isEmpty) {
+                                        _priceController.text = service.price
+                                            .toStringAsFixed(0);
+                                      }
                                       _calculateValues();
                                     }
                                   });
@@ -545,14 +576,20 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                       );
                     },
                   ),
-                  
+
                   const SizedBox(height: 16),
                   const Divider(),
                   const SizedBox(height: 16),
-                  
+
                   // === 2. Fabric Selection (category + search) ===
-                  if (_selectedService != null && (_selectedService!.defaultFabricUsage > 0 || (widget.existingItem?.fabricUsed ?? 0) > 0)) ...[
-                    const Text('2. Select Fabric Type', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  if (_selectedService != null) ...[
+                    const Text(
+                      '2. Select Fabric Type',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Align(
                       alignment: Alignment.centerRight,
@@ -567,7 +604,9 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                         return ChoiceChip(
                           label: Text(category),
                           selected: _selectedCategory == category,
-                          selectedColor: Theme.of(context).primaryColor.withOpacity(0.2),
+                          selectedColor: Theme.of(
+                            context,
+                          ).primaryColor.withValues(alpha: 0.2),
                           onSelected: (selected) {
                             if (selected) {
                               setState(() {
@@ -580,18 +619,26 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                       }).toList(),
                     ),
                     const SizedBox(height: 8),
-                    
+
                     // Search within selected category
                     TextField(
                       controller: _fabricSearchController,
                       decoration: InputDecoration(
                         hintText: 'Filter $_selectedCategory fabrics...',
-                        prefixIcon: const Icon(Icons.search),
+                        prefixIcon: const IconText(Icons.search),
                         isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 8,
+                          horizontal: 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                         filled: true,
-                        fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : Colors.grey[100],
+                        fillColor:
+                            Theme.of(context).brightness == Brightness.dark
+                            ? Colors.grey[800]
+                            : Colors.grey[100],
                       ),
                       onChanged: (value) => setState(() {}),
                     ),
@@ -600,40 +647,67 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                     if (filteredFabrics.isEmpty)
                       Padding(
                         padding: const EdgeInsets.all(8.0),
-                        child: Text('No $_selectedCategory fabric found', style: const TextStyle(color: Colors.grey)),
+                        child: Text(
+                          'No $_selectedCategory fabric found',
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurface.withValues(alpha: 0.7),
+                          ),
+                        ),
                       )
                     else
                       Container(
                         height: 150,
                         decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey.withOpacity(0.3)), 
-                          borderRadius: BorderRadius.circular(8)
+                          border: Border.all(
+                            color: Colors.grey.withValues(alpha: 0.3),
+                          ),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                         child: ListView.separated(
                           padding: EdgeInsets.zero,
                           itemCount: filteredFabrics.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          separatorBuilder: (_, separatorIndex) =>
+                              const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final fabric = filteredFabrics[index];
                             final isSelected = _selectedFabric?.id == fabric.id;
                             return ListTile(
                               dense: true,
                               selected: isSelected,
-                              selectedTileColor: Theme.of(context).primaryColor.withOpacity(0.1),
+                              selectedTileColor: Theme.of(
+                                context,
+                              ).primaryColor.withValues(alpha: 0.1),
                               leading: Container(
-                                width: 30, height: 30,
+                                width: 30,
+                                height: 30,
                                 clipBehavior: Clip.antiAlias,
                                 decoration: BoxDecoration(
                                   color: Colors.grey[300],
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: (fabric.imageUrl?.isNotEmpty ?? false)
-                                    ? Image.network(fabric.imageUrl!, fit: BoxFit.cover)
-                                    : const Icon(Icons.texture, size: 16),
+                                    ? Image.network(
+                                        fabric.imageUrl!,
+                                        fit: BoxFit.cover,
+                                      )
+                                    : const IconText(Icons.texture, size: 16),
                               ),
-                              title: Text(fabric.name, overflow: TextOverflow.ellipsis),
-                              subtitle: Text('\$${fabric.costPerUnit.toStringAsFixed(0)} / ${fabric.unit}'),
-                              trailing: isSelected ? Icon(Icons.check_circle, size: 18, color: Theme.of(context).primaryColor) : null,
+                              title: Text(
+                                fabric.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Text(
+                                '\$${fabric.costPerUnit.toStringAsFixed(0)} / ${fabric.unit}',
+                              ),
+                              trailing: isSelected
+                                  ? IconText(
+                                      Icons.check_circle,
+                                      size: 18,
+                                      color: Theme.of(context).primaryColor,
+                                    )
+                                  : null,
                               onTap: () => setState(() {
                                 _selectedFabric = fabric;
                                 _calculateValues();
@@ -642,17 +716,22 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                           },
                         ),
                       ),
-                    
+
                     const SizedBox(height: 16),
-                    
+
                     // Usage & Cost
                     Row(
                       children: [
                         Expanded(
                           child: TextFormField(
                             controller: _usageController,
-                            decoration: const InputDecoration(labelText: 'Usage (m)', border: OutlineInputBorder()),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            decoration: const InputDecoration(
+                              labelText: 'Usage (m)',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             onChanged: (_) {
                               setState(() {});
                               _calculateValues();
@@ -663,10 +742,21 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Est. Cost', style: TextStyle(fontSize: 10, color: Colors.grey)),
                             Text(
-                              '\$${estimatedMaterialCost.toStringAsFixed(0)}', 
-                              style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)
+                              'Est. Cost',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurface.withValues(alpha: 0.7),
+                              ),
+                            ),
+                            Text(
+                              '\$${estimatedMaterialCost.toStringAsFixed(0)}',
+                              style: const TextStyle(
+                                color: Colors.red,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ],
                         ),
@@ -682,14 +772,39 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                         flex: 2,
                         child: TextFormField(
                           controller: _priceController,
-                          decoration: const InputDecoration(labelText: 'Unit Price', prefixIcon: Icon(Icons.attach_money), border: OutlineInputBorder()),
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          readOnly: false,
+                          decoration: InputDecoration(
+                            labelText: 'Unit Price',
+                            prefixIcon: const IconText(Icons.attach_money),
+                            border: const OutlineInputBorder(),
+                            suffixIcon: _selectedService == null
+                                ? null
+                                : IconButton(
+                                    tooltip: 'Reset to service price',
+                                    icon: const IconText(Icons.refresh),
+                                    onPressed: () {
+                                      setState(() {
+                                        _isManualPriceEdited = false;
+                                        _priceController.text =
+                                            _selectedService!.price
+                                                .toStringAsFixed(0);
+                                      });
+                                    },
+                                  ),
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
                           inputFormatters: [
-                            FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                            FilteringTextInputFormatter.allow(
+                              RegExp(r'^\d*\.?\d{0,2}'),
+                            ),
                           ],
                           onChanged: (_) {
                             if (!_isManualPriceEdited) {
-                              setState(() => _isManualPriceEdited = true);
+                              setState(() {
+                                _isManualPriceEdited = true;
+                              });
                             }
                           },
                         ),
@@ -699,9 +814,15 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                         flex: 1,
                         child: TextFormField(
                           controller: _quantityController,
-                          decoration: const InputDecoration(labelText: 'Qty', prefixIcon: Icon(Icons.numbers), border: OutlineInputBorder()),
+                          decoration: const InputDecoration(
+                            labelText: 'Qty',
+                            prefixIcon: IconText(Icons.numbers),
+                            border: OutlineInputBorder(),
+                          ),
                           keyboardType: TextInputType.number,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
                         ),
                       ),
                     ],
@@ -715,13 +836,22 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                     decoration: InputDecoration(
                       labelText: 'Suggested Price',
                       helperText: '(Service + Material) x 2.5',
-                      prefixIcon: const Icon(Icons.calculate_outlined, color: Colors.blue),
-                      fillColor: Colors.blue.withOpacity(0.05),
+                      prefixIcon: const IconText(
+                        Icons.calculate_outlined,
+                        color: Colors.blue,
+                      ),
+                      fillColor: Colors.blue.withValues(alpha: 0.05),
                       filled: true,
                       border: const OutlineInputBorder(),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                     ),
-                    style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ],
               ),

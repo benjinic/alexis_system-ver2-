@@ -15,8 +15,8 @@ class _RevenueChartState extends State<RevenueChart> {
   // 定義圖表顏色 (您可以修改這裡！)
   // 建議使用漸層色，讓線條看起來更高級
   final List<Color> gradientColors = [
-    const Color.fromARGB(255, 28, 30, 31), // 起點：藍色 <--- 修改這裡的顏色 1
-    const Color.fromARGB(255, 50, 84, 89), // 終點：青色 <--- 修改這裡的顏色 2
+    const Color(0xFF64B5F6), // 起點：品牌淺藍色
+    const Color(0xFFCE93D8), // 終點：亮紫色
   ];
 
   @override
@@ -32,8 +32,8 @@ class _RevenueChartState extends State<RevenueChart> {
         const Text(
           'Weekly Revenue Trend',
           style: TextStyle(
-            color: const Color.fromARGB(255, 0, 0, 0),
-            fontSize: 10,
+            color: Colors.grey,
+            fontSize: 14,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -48,8 +48,9 @@ class _RevenueChartState extends State<RevenueChart> {
               }
 
               final data = _processData(snapshot.data ?? [], start);
-              final maxY = (data.map((e) => e.y).reduce((a, b) => a > b ? a : b) * 1.2)
-                  .clamp(1000.0, double.infinity);
+              final maxY =
+                  (data.map((e) => e.y).reduce((a, b) => a > b ? a : b) * 1.2)
+                      .clamp(1000.0, double.infinity);
 
               return LineChart(
                 LineChartData(
@@ -59,15 +60,19 @@ class _RevenueChartState extends State<RevenueChart> {
                     horizontalInterval: 1000,
                     getDrawingHorizontalLine: (value) {
                       return FlLine(
-                        color: Colors.white.withOpacity(0.1),
+                        color: Colors.white.withValues(alpha: 0.1),
                         strokeWidth: 1,
                       );
                     },
                   ),
                   titlesData: FlTitlesData(
                     show: true,
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
@@ -80,7 +85,7 @@ class _RevenueChartState extends State<RevenueChart> {
                             child: Text(
                               DateFormat('E').format(date),
                               style: TextStyle(
-                                color: const Color.fromARGB(255, 90, 144, 172),
+                                color: Colors.grey[500],
                                 fontSize: 12,
                               ),
                             ),
@@ -97,7 +102,7 @@ class _RevenueChartState extends State<RevenueChart> {
                           return Text(
                             '${(value / 1000).toStringAsFixed(0)}k',
                             style: TextStyle(
-                              color: const Color.fromARGB(255, 0, 0, 0),
+                              color: const Color.fromARGB(255, 9, 9, 9),
                               fontSize: 12,
                             ),
                           );
@@ -122,7 +127,7 @@ class _RevenueChartState extends State<RevenueChart> {
                         show: true,
                         gradient: LinearGradient(
                           colors: gradientColors
-                              .map((color) => color.withOpacity(0.2))
+                              .map((color) => color.withValues(alpha: 0.2))
                               .toList(),
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
@@ -150,6 +155,9 @@ class _RevenueChartState extends State<RevenueChart> {
       }
     }
 
-    return List.generate(7, (index) => FlSpot(index.toDouble(), dailyTotals[index]));
+    return List.generate(
+      7,
+      (index) => FlSpot(index.toDouble(), dailyTotals[index]),
+    );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'icon_text.dart';
 
 class StatCard extends StatelessWidget {
   final String title;
@@ -35,7 +36,7 @@ class StatCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withValues(alpha: 0.1),
               blurRadius: 8,
               offset: const Offset(0, 4),
             ),
@@ -49,15 +50,16 @@ class StatCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Icon(
+                IconText(
                   icon,
                   color: textColor ?? Theme.of(context).primaryColor,
                   size: 28,
                 ),
                 if (trendUp)
-                  Icon(
+                  IconText(
                     Icons.trending_up,
-                    color: textColor?.withOpacity(0.6) ?? Colors.green[400],
+                    color:
+                        textColor?.withValues(alpha: 0.6) ?? Colors.green[400],
                     size: 20,
                   ),
               ],
@@ -68,7 +70,7 @@ class StatCard extends StatelessWidget {
               style: TextStyle(
                 fontWeight: FontWeight.w600,
                 fontSize: 14,
-                color: textColor?.withOpacity(0.7) ?? Colors.grey[700],
+                color: textColor?.withValues(alpha: 0.7) ?? Colors.grey[700],
               ),
             ),
             const SizedBox(height: 4),
@@ -86,7 +88,7 @@ class StatCard extends StatelessWidget {
             Text(
               trend,
               style: TextStyle(
-                color: textColor?.withOpacity(0.6) ?? Colors.grey[600],
+                color: textColor?.withValues(alpha: 0.6) ?? Colors.grey[600],
                 fontSize: 12,
               ),
             ),

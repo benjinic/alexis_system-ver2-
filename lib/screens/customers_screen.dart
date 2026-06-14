@@ -1,8 +1,15 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../components/icon_text.dart';
+import 'package:universal_html/html.dart' as html;
 import '../services/database_service.dart';
+import '../services/export_service.dart';
 import '../models/customer.dart';
 import '../models/order.dart';
 import '../pages/customer_details_page.dart';
+import '../l10n/app_localizations.dart';
 
 class CustomersScreen extends StatefulWidget {
   // 移除 showTopTen 參數，改為由 Tab 控制
@@ -12,11 +19,13 @@ class CustomersScreen extends StatefulWidget {
   State<CustomersScreen> createState() => _CustomersScreenState();
 }
 
-class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProviderStateMixin {
+class _CustomersScreenState extends State<CustomersScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   final DatabaseService _databaseService = DatabaseService();
   String _searchQuery = '';
-  
+  bool _isExporting = false;
+
   // Tab 控制器
   late TabController _tabController;
 
@@ -25,7 +34,7 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
     super.initState();
     // 初始化 TabController，共有 2 個分頁
     _tabController = TabController(length: 2, vsync: this);
-    
+
     // 監聽 Tab 切換以更新 UI (例如 FAB 的顯示)
     _tabController.addListener(() {
       setState(() {});
@@ -43,19 +52,50 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Customers'),
+        title: Text(l10n.customersTitle),
         elevation: 0,
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16.0),
+            child: TextButton.icon(
+              onPressed: _isExporting ? null : () => _handleExport(context),
+              icon: IconText(
+                Icons.table_view_outlined,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              label: Text(
+                l10n.exportButton,
+                style: TextStyle(color: Theme.of(context).colorScheme.primary),
+              ),
+              style: TextButton.styleFrom(
+                backgroundColor: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.1),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ),
+        ],
         // 加入 TabBar
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: Theme.of(context).primaryColor,
           labelColor: Theme.of(context).primaryColor,
           unselectedLabelColor: Colors.grey,
-          tabs: const [
-            Tab(icon: Icon(Icons.star), text: 'Top 10 VIPs'), // 分頁 1 (預設)
-            Tab(icon: Icon(Icons.people), text: 'All Customers'), // 分頁 2
+          tabs: [
+            Tab(
+              icon: const IconText(Icons.star),
+              text: l10n.topVips,
+            ), // 分頁 1 (預設)
+            Tab(
+              icon: const IconText(Icons.people),
+              text: l10n.allCustomers,
+            ), // 分頁 2
           ],
         ),
       ),
@@ -64,17 +104,86 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
           ? FloatingActionButton(
               onPressed: () => _showAddCustomerDialog(context),
               backgroundColor: Theme.of(context).primaryColor,
-              child: const Icon(Icons.person_add, color: Colors.white),
+              child: const IconText(Icons.person_add, color: Colors.white),
             )
           : null,
       body: TabBarView(
         controller: _tabController,
         children: [
-          _buildTopTenList(),   // 對應分頁 1
+          _buildTopTenList(), // 對應分頁 1
           _buildStandardList(), // 對應分頁 2
         ],
       ),
     );
+  }
+
+  // === 匯出客戶資料 ===
+  Future<void> _exportDataLogic() async {
+    final customers = await _databaseService.getCustomersStream().first;
+    final csvData = ExportService.generateCustomersCSV(customers);
+
+    if (kIsWeb) {
+      final bytes = utf8.encode('\uFEFF$csvData');
+      final blob = html.Blob([bytes], 'text/csv;charset=utf-8');
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      html.AnchorElement(href: url)
+        ..setAttribute('download', 'Alexis_Customers.csv')
+        ..click();
+      html.Url.revokeObjectUrl(url);
+    } else {
+      await ExportService().exportCustomersToCsv(customers);
+    }
+  }
+
+  Future<void> _handleExport(BuildContext context) async {
+    setState(() => _isExporting = true);
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 16),
+            Text('Preparing data for export...'),
+          ],
+        ),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    try {
+      await _exportDataLogic();
+
+      if (mounted) {
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text('✅ Export Successful!'),
+            backgroundColor: Colors.green[700],
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('❌ Export failed: $e'),
+            backgroundColor: Colors.red[700],
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      setState(() => _isExporting = false);
+    }
   }
 
   // === 2. 標準列表 (含搜尋功能) ===
@@ -85,13 +194,19 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
           padding: const EdgeInsets.all(16.0),
           child: TextField(
             controller: _searchController,
-            onChanged: (value) => setState(() => _searchQuery = value.toLowerCase()),
+            style: const TextStyle(color: Colors.black),
+            onChanged: (value) =>
+                setState(() => _searchQuery = value.toLowerCase()),
             decoration: InputDecoration(
-              hintText: 'Search customers...',
-              prefixIcon: const Icon(Icons.search),
+              hintText: AppLocalizations.of(context).searchCustomersHint,
+              hintStyle: TextStyle(color: Colors.grey[600]),
+              prefixIcon: const IconText(Icons.search),
               filled: true,
               fillColor: Colors.grey[100],
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
               contentPadding: const EdgeInsets.symmetric(horizontal: 16),
             ),
           ),
@@ -100,23 +215,34 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
           child: StreamBuilder<List<Customer>>(
             stream: _databaseService.getCustomersStream(),
             builder: (context, snapshot) {
-              if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
-              if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+              if (snapshot.hasError) {
+                return Center(child: Text('Error: ${snapshot.error}'));
+              }
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
               final allCustomers = snapshot.data ?? [];
               final customers = allCustomers.where((c) {
-                if (_searchQuery.isEmpty) return true;
+                if (_searchQuery.isEmpty) {
+                  return true;
+                }
                 return c.name.toLowerCase().contains(_searchQuery) ||
                     c.phone.contains(_searchQuery) ||
                     c.email.toLowerCase().contains(_searchQuery);
               }).toList();
 
-              if (customers.isEmpty) return const Center(child: Text('No customers found.'));
+              if (customers.isEmpty) {
+                return Center(
+                  child: Text(AppLocalizations.of(context).noCustomersFound),
+                );
+              }
 
               return ListView.separated(
                 padding: const EdgeInsets.only(bottom: 80),
                 itemCount: customers.length,
-                separatorBuilder: (context, index) => const Divider(height: 1, indent: 72),
+                separatorBuilder: (context, index) =>
+                    const Divider(height: 1, indent: 72),
                 itemBuilder: (context, index) {
                   final customer = customers[index];
                   return _CustomerListTile(
@@ -124,7 +250,10 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (context) => CustomerDetailsPage(customer: customer)),
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              CustomerDetailsPage(customer: customer),
+                        ),
                       );
                     },
                   );
@@ -136,6 +265,7 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
       ],
     );
   }
+
   // === 1. Top 10 列表 (近 2 年消費排行) ===
   Widget _buildTopTenList() {
     final now = DateTime.now();
@@ -146,38 +276,51 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
         // 頂部提示
         Container(
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-          color: Colors.amber.withOpacity(0.1),
+          color: Colors.amber.shade200.withValues(alpha: 0.1),
           width: double.infinity,
           child: Row(
             children: [
-              const Icon(Icons.info_outline, size: 16, color: Colors.amber),
+              const IconText(Icons.info_outline, size: 16, color: Colors.amber),
               const SizedBox(width: 8),
               Text(
-                'Ranking based on spending in last 2 years',
+                AppLocalizations.of(context).spendingInfo,
                 style: TextStyle(color: Colors.amber[900], fontSize: 12),
               ),
             ],
           ),
         ),
-        
+
         // 列表內容
         Expanded(
           child: StreamBuilder<List<Order>>(
-            stream: _databaseService.getOrdersByDateRangeStream(twoYearsAgo, now),
+            stream: _databaseService.getOrdersByDateRangeStream(
+              twoYearsAgo,
+              now,
+            ),
             builder: (context, orderSnapshot) {
-              if (orderSnapshot.hasError) return Center(child: Text('Error: ${orderSnapshot.error}'));
-              if (orderSnapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+              if (orderSnapshot.hasError) {
+                return Center(child: Text('Error: ${orderSnapshot.error}'));
+              }
+              if (orderSnapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
               final orders = orderSnapshot.data ?? [];
-              if (orders.isEmpty) return const Center(child: Text('No orders in the last 2 years.'));
+              if (orders.isEmpty) {
+                return Center(
+                  child: Text(AppLocalizations.of(context).noOrdersInPeriod),
+                );
+              }
 
               final Map<String, double> spendingMap = {};
               final Map<String, int> orderCountMap = {};
 
               for (var order in orders) {
                 if (order.customerId.isNotEmpty) {
-                  spendingMap[order.customerId] = (spendingMap[order.customerId] ?? 0) + order.total;
-                  orderCountMap[order.customerId] = (orderCountMap[order.customerId] ?? 0) + 1;
+                  spendingMap[order.customerId] =
+                      (spendingMap[order.customerId] ?? 0) + order.total;
+                  orderCountMap[order.customerId] =
+                      (orderCountMap[order.customerId] ?? 0) + 1;
                 }
               }
 
@@ -186,15 +329,20 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
 
               final topIds = sortedEntries.take(10).map((e) => e.key).toList();
 
-              if (topIds.isEmpty) return const Center(child: Text('No customer data found.'));
+              if (topIds.isEmpty) {
+                return const Center(child: Text('No customer data found.'));
+              }
 
               return StreamBuilder<List<Customer>>(
                 stream: _databaseService.getCustomersByIds(topIds),
                 builder: (context, customerSnapshot) {
-                  if (customerSnapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+                  if (customerSnapshot.connectionState ==
+                      ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
                   final customers = customerSnapshot.data ?? [];
-                  
+
                   customers.sort((a, b) {
                     double spentA = spendingMap[a.id] ?? 0;
                     double spentB = spendingMap[b.id] ?? 0;
@@ -204,7 +352,7 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
                   return ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: customers.length,
-                    separatorBuilder: (_, __) => const Divider(),
+                    separatorBuilder: (_, separatorIndex) => const Divider(),
                     itemBuilder: (context, index) {
                       final customer = customers[index];
                       final recentSpent = spendingMap[customer.id] ?? 0;
@@ -212,30 +360,49 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
 
                       return ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: index < 3 ? Colors.amber[100 * (3 - index)] : Colors.grey[200],
+                          backgroundColor: index < 3
+                              ? Colors.amber[100 * (3 - index)]
+                              : Colors.grey[200],
                           foregroundColor: Colors.black87,
                           child: Text('#${index + 1}'),
                         ),
-                        title: Text(customer.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        title: Text(
+                          customer.name,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         subtitle: Text(
-                          '2-Year Spent: \$${recentSpent.toStringAsFixed(0)}',
-                          style: TextStyle(color: Colors.green[700], fontWeight: FontWeight.w500),
+                          '${AppLocalizations.of(context).twoYearSpent} \$${recentSpent.toStringAsFixed(0)}',
+                          style: TextStyle(
+                            color: Colors.green[700],
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                         trailing: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).primaryColor.withOpacity(0.1),
+                            color: Theme.of(
+                              context,
+                            ).primaryColor.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
-                            '$recentOrders Orders',
-                            style: TextStyle(color: Theme.of(context).primaryColor, fontWeight: FontWeight.bold),
+                            '$recentOrders ${AppLocalizations.of(context).ordersLabel}',
+                            style: TextStyle(
+                              color: Theme.of(context).primaryColor,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                         onTap: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (context) => CustomerDetailsPage(customer: customer)),
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  CustomerDetailsPage(customer: customer),
+                            ),
                           );
                         },
                       );
@@ -260,7 +427,7 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Add New Customer'),
+        title: Text(AppLocalizations.of(context).addNewCustomer),
         content: Form(
           key: formKey,
           child: Column(
@@ -270,8 +437,14 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
                 controller: nameController,
                 decoration: const InputDecoration(
                   labelText: 'Name',
-                  prefixIcon: Icon(Icons.person),
+                  prefixIcon: IconText(Icons.person),
                 ),
+                inputFormatters: [
+                  TextInputFormatter.withFunction(
+                    (oldValue, newValue) =>
+                        newValue.copyWith(text: newValue.text.toUpperCase()),
+                  ),
+                ],
                 validator: (v) => v!.isEmpty ? 'Required' : null,
               ),
               const SizedBox(height: 12),
@@ -279,7 +452,7 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
                 controller: phoneController,
                 decoration: const InputDecoration(
                   labelText: 'Phone',
-                  prefixIcon: Icon(Icons.phone),
+                  prefixIcon: IconText(Icons.phone),
                 ),
                 keyboardType: TextInputType.phone,
               ),
@@ -288,7 +461,7 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
                 controller: emailController,
                 decoration: const InputDecoration(
                   labelText: 'Email',
-                  prefixIcon: Icon(Icons.email),
+                  prefixIcon: IconText(Icons.email),
                 ),
                 keyboardType: TextInputType.emailAddress,
               ),
@@ -298,7 +471,7 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(AppLocalizations.of(context).cancelButton),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -312,25 +485,33 @@ class _CustomersScreenState extends State<CustomersScreen> with SingleTickerProv
                     orders: 0,
                     totalSpent: 0,
                   );
-                  
+
                   await _databaseService.addCustomer(newCustomer);
-                  
+
                   if (context.mounted) {
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Customer Added'), backgroundColor: Colors.green),
+                      SnackBar(
+                        content: Text(
+                          AppLocalizations.of(context).customerAddedSuccess,
+                        ),
+                        backgroundColor: Colors.green,
+                      ),
                     );
                   }
                 } catch (e) {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                      SnackBar(
+                        content: Text('Error: $e'),
+                        backgroundColor: Colors.red,
+                      ),
                     );
                   }
                 }
               }
             },
-            child: const Text('Add'),
+            child: Text(AppLocalizations.of(context).addButton),
           ),
         ],
       ),
@@ -351,17 +532,29 @@ class _CustomerListTile extends StatelessWidget {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       onTap: onTap,
       leading: CircleAvatar(
-        backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+        backgroundColor: Theme.of(context).primaryColor.withValues(alpha: 0.1),
         child: Text(
           customer.name.isNotEmpty ? customer.name[0].toUpperCase() : '?',
-          style: TextStyle(color: Theme.of(context).primaryColor, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: Theme.of(context).primaryColor,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
-      title: Text(customer.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+      title: Text(
+        customer.name,
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+      ),
       subtitle: customer.phone.isNotEmpty
-          ? Row(children: [Icon(Icons.phone, size: 14, color: Colors.grey[600]), const SizedBox(width: 4), Text(customer.phone, style: TextStyle(color: Colors.grey[600]))])
+          ? Row(
+              children: [
+                IconText(Icons.phone, size: 14, color: Colors.grey[600]),
+                const SizedBox(width: 4),
+                Text(customer.phone, style: TextStyle(color: Colors.grey[600])),
+              ],
+            )
           : null,
-      trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+      trailing: const IconText(Icons.chevron_right, color: Colors.grey),
     );
   }
 }

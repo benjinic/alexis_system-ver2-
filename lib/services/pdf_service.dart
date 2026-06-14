@@ -114,7 +114,7 @@ class PdfService {
               pw.Text(
                 'ALEXIS BESPOKE',
                 style: pw.TextStyle(
-                  fontSize: 18,
+                  fontSize: 20,
                   fontWeight: pw.FontWeight.bold,
                   letterSpacing: 1,
                 ),
@@ -123,14 +123,14 @@ class PdfService {
               pw.Text(
                 'Room 602, 6F, Wing Fu Building,',
                 style: const pw.TextStyle(
-                  fontSize: 8,
+                  fontSize: 10,
                   color: PdfColors.grey700,
                 ),
               ),
               pw.Text(
                 '18-24 Wing Kut Street, Central, Hong Kong',
                 style: const pw.TextStyle(
-                  fontSize: 8,
+                  fontSize: 10,
                   color: PdfColors.grey700,
                 ),
               ),
@@ -150,7 +150,7 @@ class PdfService {
               pw.Text(
                 'TOTAL',
                 style: pw.TextStyle(
-                  fontSize: 10,
+                  fontSize: 12,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
@@ -158,7 +158,7 @@ class PdfService {
               pw.Text(
                 '\$${order.total.toStringAsFixed(2)}',
                 style: pw.TextStyle(
-                  fontSize: 20,
+                  fontSize: 22,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
@@ -171,11 +171,11 @@ class PdfService {
           children: [
             pw.Text(
               'Items',
-              style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+              style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
             ),
             pw.Text(
               'Price',
-              style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+              style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
             ),
           ],
         ),
@@ -197,20 +197,20 @@ class PdfService {
                       children: [
                         pw.Text(
                           item.service,
-                          style: const pw.TextStyle(fontSize: 10),
+                          style: const pw.TextStyle(fontSize: 12),
                         ),
                         if (item.fabricName != null)
                           pw.Text(
-                            'Mat: ${item.fabricName} / Code: ${item.fabricId ?? "-"}',
+                            'Mat: ${item.fabricName}',
                             style: const pw.TextStyle(
-                              fontSize: 8,
+                              fontSize: 10,
                               color: PdfColors.grey700,
                             ),
                           ),
                         pw.Text(
                           '(${item.quantity.toInt()} x \$${item.price.toStringAsFixed(2)})',
                           style: const pw.TextStyle(
-                            fontSize: 8,
+                            fontSize: 10,
                             color: PdfColors.grey700,
                           ),
                         ),
@@ -225,7 +225,7 @@ class PdfService {
                         pw.Text(
                           '\$${(item.price * item.quantity).toStringAsFixed(2)}',
                           style: pw.TextStyle(
-                            fontSize: 10,
+                            fontSize: 12,
                             fontWeight: pw.FontWeight.bold,
                           ),
                         ),
@@ -264,9 +264,9 @@ class PdfService {
         pw.SizedBox(height: 10),
         pw.Text(
           'Order Note:',
-          style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+          style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
         ),
-        pw.Text(order.id, style: const pw.TextStyle(fontSize: 9)),
+        pw.Text(order.id, style: const pw.TextStyle(fontSize: 11)),
         pw.SizedBox(height: 10),
         pw.Center(
           child: pw.Column(
@@ -274,24 +274,24 @@ class PdfService {
               pw.Text(
                 'Sold to: ${order.customerName}',
                 style: pw.TextStyle(
-                  fontSize: 9,
+                  fontSize: 11,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
               if (order.createdAt != null)
                 pw.Text(
                   dateFormat.format(order.createdAt!),
-                  style: const pw.TextStyle(fontSize: 9),
+                  style: const pw.TextStyle(fontSize: 11),
                 ),
               pw.Text(
                 'Receipt: #${order.id}',
-                style: const pw.TextStyle(fontSize: 9),
+                style: const pw.TextStyle(fontSize: 11),
               ),
               pw.SizedBox(height: 5),
               pw.Text(
                 'NO EXCHANGE NO REFUND',
                 style: pw.TextStyle(
-                  fontSize: 9,
+                  fontSize: 11,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
@@ -304,7 +304,7 @@ class PdfService {
             'Thank you for shopping with Alexis Bespoke! We look forward to serving you again.',
             textAlign: pw.TextAlign.center,
             style: pw.TextStyle(
-              fontSize: 9,
+              fontSize: 11,
               fontWeight: pw.FontWeight.bold,
               fontStyle: pw.FontStyle.italic,
               color: PdfColors.grey800,
@@ -315,7 +315,7 @@ class PdfService {
         pw.Text(
           'Products are not eligible for any aftersales services. The customer confirms that all items have been inspected and received in good condition. The customer acknowledges and accepts that all purchases are final.',
           textAlign: pw.TextAlign.justify,
-          style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey700),
+          style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
         ),
         pw.SizedBox(height: 25),
         pw.Container(
@@ -325,7 +325,7 @@ class PdfService {
           height: 20,
         ),
         pw.Center(
-          child: pw.Text('Signature', style: const pw.TextStyle(fontSize: 8)),
+          child: pw.Text('Signature', style: const pw.TextStyle(fontSize: 10)),
         ),
       ],
     );
@@ -339,11 +339,11 @@ class PdfService {
         children: [
           pw.Text(
             left,
-            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+            style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
           ),
           pw.Text(
             right,
-            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+            style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
           ),
         ],
       ),
@@ -407,14 +407,19 @@ class PdfService {
                   border: pw.TableBorder.all(width: 1),
                   children: [
                     _buildTableRow(['單號 No.', order.orderId], boldFont),
-                    _buildTableRow(['日期 Date', order.createdAt != null ? dateFormat.format(order.createdAt!) : ''], font),
+                    _buildTableRow([
+                      '日期 Date',
+                      order.createdAt != null
+                          ? dateFormat.format(order.createdAt!)
+                          : '',
+                    ], font),
                     _buildTableRow(['剪單 Cutter', ''], font),
                   ],
                 ),
               ),
             ],
           ),
-          
+
           pw.SizedBox(height: 15),
 
           // 2. 客戶資料欄
@@ -422,9 +427,19 @@ class PdfService {
             decoration: pw.BoxDecoration(border: borderStyle),
             child: pw.Row(
               children: [
-                _buildInfoCell('客人名稱 Name', order.customer, flex: 3, font: boldFont),
+                _buildInfoCell(
+                  '客人名稱 Name',
+                  order.customer,
+                  flex: 3,
+                  font: boldFont,
+                ),
                 _buildInfoCell('電話 Tel', '', flex: 2, font: font),
-                _buildInfoCell('試身/交貨日期', dateFormat.format(order.dueDate), flex: 3, font: boldFont),
+                _buildInfoCell(
+                  '試身/交貨日期',
+                  dateFormat.format(order.dueDate),
+                  flex: 3,
+                  font: boldFont,
+                ),
               ],
             ),
           ),
@@ -457,13 +472,20 @@ class PdfService {
                       _buildMeasurementRow('袖口 Cuff (L)', ''),
                       _buildMeasurementRow('袖口 Cuff (R)', ''),
                       _buildMeasurementRow('領口 Neck', ''),
-                      
+
                       pw.Divider(height: 1, thickness: 1),
                       pw.Container(
                         color: PdfColors.grey200,
                         width: double.infinity,
                         padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                        child: pw.Text('褲 Trouser', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                        child: pw.Text(
+                          '褲 Trouser',
+                          textAlign: pw.TextAlign.center,
+                          style: pw.TextStyle(
+                            fontSize: 10,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
                       ),
                       _buildMeasurementRow('腰圍 Waist', ''),
                       _buildMeasurementRow('坐圍 Hip', ''),
@@ -479,7 +501,13 @@ class PdfService {
                         child: pw.Column(
                           crossAxisAlignment: pw.CrossAxisAlignment.start,
                           children: [
-                            pw.Text('恤衫 Shirt:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
+                            pw.Text(
+                              '恤衫 Shirt:',
+                              style: pw.TextStyle(
+                                fontWeight: pw.FontWeight.bold,
+                                fontSize: 10,
+                              ),
+                            ),
                             _buildCompactRow('領 Collar:', ''),
                             _buildCompactRow('袖 Cuff:', ''),
                             _buildCompactRow('前 Front:', ''),
@@ -508,21 +536,56 @@ class PdfService {
                               ),
                               child: pw.Row(
                                 children: [
-                                  pw.Expanded(child: pw.Center(child: pw.Text('布料 Fabric', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)))),
-                                  pw.Container(width: 1, height: 20, color: PdfColors.black),
-                                  pw.Expanded(child: pw.Center(child: pw.Text('里布 Lining', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)))),
+                                  pw.Expanded(
+                                    child: pw.Center(
+                                      child: pw.Text(
+                                        '布料 Fabric',
+                                        style: pw.TextStyle(
+                                          fontWeight: pw.FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  pw.Container(
+                                    width: 1,
+                                    height: 20,
+                                    color: PdfColors.black,
+                                  ),
+                                  pw.Expanded(
+                                    child: pw.Center(
+                                      child: pw.Text(
+                                        '里布 Lining',
+                                        style: pw.TextStyle(
+                                          fontWeight: pw.FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
                             pw.Padding(
                               padding: const pw.EdgeInsets.all(5),
                               child: pw.Row(
-                                mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                                mainAxisAlignment:
+                                    pw.MainAxisAlignment.spaceAround,
                                 children: [
-                                  _buildCategoryCheck('西裝 Suit', order.itemType == 'SUIT'),
-                                  _buildCategoryCheck('外套 Jkt', order.itemType == 'JACKET'),
-                                  _buildCategoryCheck('褲 Trs', order.itemType == 'TROUSER'),
-                                  _buildCategoryCheck('恤衫 Shirt', order.itemType == 'SHIRT'),
+                                  _buildCategoryCheck(
+                                    '西裝 Suit',
+                                    order.itemType == 'SUIT',
+                                  ),
+                                  _buildCategoryCheck(
+                                    '外套 Jkt',
+                                    order.itemType == 'JACKET',
+                                  ),
+                                  _buildCategoryCheck(
+                                    '褲 Trs',
+                                    order.itemType == 'TROUSER',
+                                  ),
+                                  _buildCategoryCheck(
+                                    '恤衫 Shirt',
+                                    order.itemType == 'SHIRT',
+                                  ),
                                 ],
                               ),
                             ),
@@ -530,15 +593,24 @@ class PdfService {
                               child: pw.Center(
                                 child: pw.Text(
                                   order.item,
-                                  style: pw.TextStyle(fontSize: 20, color: PdfColors.grey300, fontWeight: pw.FontWeight.bold),
+                                  style: pw.TextStyle(
+                                    fontSize: 20,
+                                    color: PdfColors.grey300,
+                                    fontWeight: pw.FontWeight.bold,
+                                  ),
                                 ),
                               ),
                             ),
                             pw.Container(
                               width: double.infinity,
                               padding: const pw.EdgeInsets.all(5),
-                              decoration: const pw.BoxDecoration(border: pw.Border(top: pw.BorderSide())),
-                              child: pw.Text('備註 Notes: ${order.notes}', style: const pw.TextStyle(fontSize: 10)),
+                              decoration: const pw.BoxDecoration(
+                                border: pw.Border(top: pw.BorderSide()),
+                              ),
+                              child: pw.Text(
+                                '備註 Notes: ${order.notes}',
+                                style: const pw.TextStyle(fontSize: 10),
+                              ),
                             ),
                           ],
                         ),
@@ -557,23 +629,46 @@ class PdfService {
                                 child: pw.Container(
                                   padding: const pw.EdgeInsets.all(5),
                                   child: pw.Column(
-                                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        pw.CrossAxisAlignment.start,
                                     children: [
-                                      pw.Text('外套 Jacket', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8)), // Reduced title size
+                                      pw.Text(
+                                        '外套 Jacket',
+                                        style: pw.TextStyle(
+                                          fontWeight: pw.FontWeight.bold,
+                                          fontSize: 8,
+                                        ),
+                                      ), // Reduced title size
                                       pw.Divider(thickness: 0.5),
-                                      _buildCheckRow('剪裁 Fit:', ['貼身', '正常', '鬆身']),
+                                      _buildCheckRow('剪裁 Fit:', [
+                                        '貼身',
+                                        '正常',
+                                        '鬆身',
+                                      ]),
                                       _buildCheckRow('做工 Make:', ['全襯', '半襯']),
                                       _buildCheckRow('里布 Lin:', ['全里', '半里']),
-                                      _buildCheckRow('內襟珠線 Inner stitch :', ['有', '無']),
-                                      _buildCheckRow('腰袋 Pocket design :', ['平袋', '斜袋', '貼袋', '腰折袋']),
-                                      _buildCheckRow('後叉 Vent:', ['雙開', '單開', '無']),
+                                      _buildCheckRow('內襟珠線 Inner stitch :', [
+                                        '有',
+                                        '無',
+                                      ]),
+                                      _buildCheckRow('腰袋 Pocket design :', [
+                                        '平袋',
+                                        '斜袋',
+                                        '貼袋',
+                                        '腰折袋',
+                                      ]),
+                                      _buildCheckRow('後叉 Vent:', [
+                                        '雙開',
+                                        '單開',
+                                        '無',
+                                      ]),
                                       pw.SizedBox(height: 4),
                                       _buildSimpleCheck('珠邊 Pick Stitch'),
                                       _buildSimpleCheck('袖口開鈕 Functional Cuff'),
                                       _buildSimpleCheck('直角領 Peak Lapel'),
                                     ],
                                   ),
-                                )
+                                ),
                               ),
                               pw.Container(width: 1, color: PdfColors.black),
                               // 右半：褲款式
@@ -592,14 +687,42 @@ class PdfService {
                                         ),
                                       ),
                                       pw.Divider(thickness: 0.5),
-                                      _buildCheckRow('褶 Pleat:', ['0', '1', '2','反褶Reverse pleat']),
-                                      _buildCheckRow('腰帶 Waistbands:', ['腰帶Beltloop', '橡筋Elastic','側扣Side adjuster']),
-                                      _buildCheckRow('搭帶 Closure:', ['圓搭帶round', '尖搭帶point']),
-                                      _buildCheckRow('前袋 Front Pocket:', ['斜袋Slant', '平袋Straight']),
-                                      _buildCheckRow('後袋 Back Pocket:', ['鈕扣Button', '無鈕扣No Button','0', '1','2']),
-                                      _buildCheckRow('錢袋 Watch Pocket:', ['有', '無']),
-                                      _buildCheckRow('褲腳 Hem:', ['直腳Plain', '摺腳Cuffed', '摺腳加高Cuffed High']),
-                                      
+                                      _buildCheckRow('褶 Pleat:', [
+                                        '0',
+                                        '1',
+                                        '2',
+                                        '反褶Reverse pleat',
+                                      ]),
+                                      _buildCheckRow('腰帶 Waistbands:', [
+                                        '腰帶Beltloop',
+                                        '橡筋Elastic',
+                                        '側扣Side adjuster',
+                                      ]),
+                                      _buildCheckRow('搭帶 Closure:', [
+                                        '圓搭帶round',
+                                        '尖搭帶point',
+                                      ]),
+                                      _buildCheckRow('前袋 Front Pocket:', [
+                                        '斜袋Slant',
+                                        '平袋Straight',
+                                      ]),
+                                      _buildCheckRow('後袋 Back Pocket:', [
+                                        '鈕扣Button',
+                                        '無鈕扣No Button',
+                                        '0',
+                                        '1',
+                                        '2',
+                                      ]),
+                                      _buildCheckRow('錢袋 Watch Pocket:', [
+                                        '有',
+                                        '無',
+                                      ]),
+                                      _buildCheckRow('褲腳 Hem:', [
+                                        '直腳Plain',
+                                        '摺腳Cuffed',
+                                        '摺腳加高Cuffed High',
+                                      ]),
+
                                       pw.SizedBox(height: 4),
                                       _buildSimpleCheck('Button Tab'),
                                       _buildSimpleCheck('Watch Pocket'),
@@ -627,14 +750,23 @@ class PdfService {
 
   pw.TableRow _buildTableRow(List<String> cells, pw.Font font) {
     return pw.TableRow(
-      children: cells.map((c) => pw.Padding(
-        padding: const pw.EdgeInsets.all(4),
-        child: pw.Text(c, style: pw.TextStyle(font: font, fontSize: 9)),
-      )).toList(),
+      children: cells
+          .map(
+            (c) => pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text(c, style: pw.TextStyle(font: font, fontSize: 9)),
+            ),
+          )
+          .toList(),
     );
   }
 
-  pw.Widget _buildInfoCell(String label, String value, {int flex = 1, required pw.Font font}) {
+  pw.Widget _buildInfoCell(
+    String label,
+    String value, {
+    int flex = 1,
+    required pw.Font font,
+  }) {
     return pw.Expanded(
       flex: flex,
       child: pw.Container(
@@ -644,8 +776,24 @@ class PdfService {
         ),
         child: pw.Row(
           children: [
-            pw.Text('$label: ', style: pw.TextStyle(font: font, fontSize: 10, color: PdfColors.grey700)),
-            pw.Expanded(child: pw.Text(value, style: pw.TextStyle(font: font, fontSize: 11, fontWeight: pw.FontWeight.bold))),
+            pw.Text(
+              '$label: ',
+              style: pw.TextStyle(
+                font: font,
+                fontSize: 10,
+                color: PdfColors.grey700,
+              ),
+            ),
+            pw.Expanded(
+              child: pw.Text(
+                value,
+                style: pw.TextStyle(
+                  font: font,
+                  fontSize: 11,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -656,13 +804,15 @@ class PdfService {
     return pw.Container(
       padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 6),
       decoration: const pw.BoxDecoration(
-        border: pw.Border(bottom: pw.BorderSide(width: 0.5, color: PdfColors.grey400)),
+        border: pw.Border(
+          bottom: pw.BorderSide(width: 0.5, color: PdfColors.grey400),
+        ),
       ),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
           pw.Text(label, style: const pw.TextStyle(fontSize: 9)),
-          pw.Container(width: 40, height: 12, color: PdfColors.grey100), 
+          pw.Container(width: 40, height: 12, color: PdfColors.grey100),
         ],
       ),
     );
@@ -673,7 +823,10 @@ class PdfService {
       padding: const pw.EdgeInsets.symmetric(vertical: 2),
       child: pw.Row(
         children: [
-          pw.SizedBox(width: 40, child: pw.Text(label, style: const pw.TextStyle(fontSize: 8))),
+          pw.SizedBox(
+            width: 40,
+            child: pw.Text(label, style: const pw.TextStyle(fontSize: 8)),
+          ),
           pw.Expanded(child: pw.Container(height: 1, color: PdfColors.grey400)),
         ],
       ),
@@ -703,19 +856,35 @@ class PdfService {
       child: pw.Row(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.SizedBox(width: 55, child: pw.Text(label, style: const pw.TextStyle(fontSize: 8))), // Font size 8
+          pw.SizedBox(
+            width: 55,
+            child: pw.Text(label, style: const pw.TextStyle(fontSize: 8)),
+          ), // Font size 8
           pw.Expanded(
             child: pw.Wrap(
               spacing: 4, // Reduced spacing
               runSpacing: 2,
-              children: options.map((opt) => pw.Row(
-                mainAxisSize: pw.MainAxisSize.min,
-                children: [
-                  pw.Container(width: 6, height: 6, decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5))), // 6x6 box, thin border
-                  pw.SizedBox(width: 2),
-                  pw.Text(opt, style: const pw.TextStyle(fontSize: 8)), // Font size 8
-                ],
-              )).toList(),
+              children: options
+                  .map(
+                    (opt) => pw.Row(
+                      mainAxisSize: pw.MainAxisSize.min,
+                      children: [
+                        pw.Container(
+                          width: 6,
+                          height: 6,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border.all(width: 0.5),
+                          ),
+                        ), // 6x6 box, thin border
+                        pw.SizedBox(width: 2),
+                        pw.Text(
+                          opt,
+                          style: const pw.TextStyle(fontSize: 8),
+                        ), // Font size 8
+                      ],
+                    ),
+                  )
+                  .toList(),
             ),
           ),
         ],
@@ -728,7 +897,11 @@ class PdfService {
       padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
       child: pw.Row(
         children: [
-          pw.Container(width: 6, height: 6, decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5))), // 6x6 box, thin border
+          pw.Container(
+            width: 6,
+            height: 6,
+            decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5)),
+          ), // 6x6 box, thin border
           pw.SizedBox(width: 4),
           pw.Text(label, style: const pw.TextStyle(fontSize: 8)), // Font size 8
         ],

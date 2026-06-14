@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../components/icon_text.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/customer.dart';
 import '../models/order.dart';
+import '../models/service_item.dart';
 import '../services/database_service.dart';
+import '../services/cost_calculation_service.dart';
+import '../l10n/app_localizations.dart';
 
 class CustomerDetailsPage extends StatefulWidget {
   final Customer customer;
@@ -17,10 +22,6 @@ class CustomerDetailsPage extends StatefulWidget {
 class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
   final DatabaseService _dbService = DatabaseService();
   late Customer _customer;
-  
-  // 新增：日期篩選相關狀態
-  String _revenueFilterMode = 'Month';
-  DateTimeRange? _customDateRange;
 
   @override
   void initState() {
@@ -35,7 +36,10 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not launch action'), backgroundColor: Colors.red),
+          const SnackBar(
+            content: Text('Could not launch action'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -51,7 +55,7 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Edit Customer Profile'),
+        title: Text(AppLocalizations.of(ctx).editCustomerProfile),
         content: Form(
           key: formKey,
           child: Column(
@@ -61,8 +65,14 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
                 controller: nameController,
                 decoration: const InputDecoration(
                   labelText: 'Name',
-                  prefixIcon: Icon(Icons.person),
+                  prefixIcon: IconText(Icons.person),
                 ),
+                inputFormatters: [
+                  TextInputFormatter.withFunction(
+                    (oldValue, newValue) =>
+                        newValue.copyWith(text: newValue.text.toUpperCase()),
+                  ),
+                ],
                 validator: (v) => v!.isEmpty ? 'Name is required' : null,
               ),
               const SizedBox(height: 12),
@@ -70,7 +80,7 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
                 controller: phoneController,
                 decoration: const InputDecoration(
                   labelText: 'Phone',
-                  prefixIcon: Icon(Icons.phone),
+                  prefixIcon: IconText(Icons.phone),
                 ),
                 keyboardType: TextInputType.phone,
               ),
@@ -79,7 +89,7 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
                 controller: emailController,
                 decoration: const InputDecoration(
                   labelText: 'Email',
-                  prefixIcon: Icon(Icons.email),
+                  prefixIcon: IconText(Icons.email),
                 ),
                 keyboardType: TextInputType.emailAddress,
               ),
@@ -89,11 +99,14 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(AppLocalizations.of(ctx).cancelButton),
           ),
           ElevatedButton(
             onPressed: () async {
               if (formKey.currentState!.validate()) {
+                final navigator = Navigator.of(ctx);
+                final messenger = ScaffoldMessenger.of(context);
+                final l10n = AppLocalizations.of(context);
                 try {
                   // 1. 建立更新後的物件
                   final updatedCustomer = _customer.copyWith(
@@ -101,33 +114,36 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
                     phone: phoneController.text.trim(),
                     email: emailController.text.trim(),
                   );
-                  
+
                   // 2. 寫入資料庫
                   await _dbService.updateCustomer(updatedCustomer);
-                  
+
+                  if (!mounted) return;
+
                   // 3. 更新畫面
-                  if (mounted) {
-                    setState(() {
-                      _customer = updatedCustomer;
-                    });
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Profile updated successfully'), 
-                        backgroundColor: Colors.green
-                      ),
-                    );
-                  }
+                  setState(() {
+                    _customer = updatedCustomer;
+                  });
+                  navigator.pop();
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(l10n.profileUpdated),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
                 } catch (e) {
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text('Error: $e'),
+                        backgroundColor: Colors.red,
+                      ),
                     );
                   }
                 }
               }
             },
-            child: const Text('Save'),
+            child: Text(AppLocalizations.of(ctx).saveButton),
           ),
         ],
       ),
@@ -154,13 +170,15 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
 
       final Map<String, TextEditingController> controllers = {};
       for (var field in fields) {
-        controllers[field] = TextEditingController(text: _customer.measurements[field] ?? '');
+        controllers[field] = TextEditingController(
+          text: _customer.measurements[field] ?? '',
+        );
       }
 
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Edit Measurements'),
+          title: Text(AppLocalizations.of(ctx).editMeasurements),
           content: SingleChildScrollView(
             child: Wrap(
               spacing: 12,
@@ -181,7 +199,10 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(AppLocalizations.of(ctx).cancelButton),
+            ),
             ElevatedButton(
               onPressed: () async {
                 Map<String, String> newMeasurements = {};
@@ -191,24 +212,33 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
                   }
                 });
 
+                final navigator = Navigator.of(ctx);
+                final messenger = ScaffoldMessenger.of(context);
+                final l10n = AppLocalizations.of(context);
+
                 try {
-                  final updatedCustomer = _customer.copyWith(measurements: newMeasurements);
+                  final updatedCustomer = _customer.copyWith(
+                    measurements: newMeasurements,
+                  );
                   await _dbService.updateCustomer(updatedCustomer);
-                  
-                  if (mounted) {
-                    setState(() {
-                      _customer = updatedCustomer;
-                    });
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Measurements updated!'), backgroundColor: Colors.green),
-                    );
-                  }
+
+                  if (!mounted) return;
+
+                  setState(() {
+                    _customer = updatedCustomer;
+                  });
+                  navigator.pop();
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(l10n.measurementsUpdated),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
                 } catch (e) {
-                  print(e);
+                  debugPrint('Failed to update measurements: $e');
                 }
               },
-              child: const Text('Save'),
+              child: Text(AppLocalizations.of(ctx).saveButton),
             ),
           ],
         ),
@@ -218,54 +248,19 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
     }
   }
 
-  // 新增：取得當前篩選器的日期範圍 (供多個卡片共用)
-  DateTimeRange _getDateRange() {
-    final now = DateTime.now();
-    DateTime start, end;
-
-    // 設定截止時間為當天的最後一秒
-    end = DateTime(now.year, now.month, now.day, 23, 59, 59);
-
-    switch (_revenueFilterMode) {
-      case 'Week':
-        start = now.subtract(Duration(days: now.weekday - 1));
-        start = DateTime(start.year, start.month, start.day);
-        break;
-      case 'Month':
-        start = DateTime(now.year, now.month, 1);
-        break;
-      case 'Year':
-        start = DateTime(now.year, 1, 1);
-        break;
-      case 'Custom':
-        if (_customDateRange != null) {
-          start = _customDateRange!.start;
-          end = _customDateRange!.end.add(
-            const Duration(hours: 23, minutes: 59, seconds: 59),
-          );
-        } else {
-          // 若未選日期，預設顯示今天
-          start = DateTime(now.year, now.month, now.day);
-        }
-        break;
-      default:
-        start = DateTime(now.year, now.month, 1);
-    }
-    return DateTimeRange(start: start, end: end);
-  }
-
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Customer Profile'),
+        title: Text(l10n.customerProfile),
         elevation: 0,
         actions: [
-          // 這是頁面右上角的編輯按鈕，現在綁定到修改資料功能
+          // 這是頁面右上觓的編輯按鈕，現在綁定到修改資料功能
           IconButton(
-            icon: const Icon(Icons.edit),
-            tooltip: 'Edit Profile (Phone/Email)',
-            onPressed: _showEditProfileDialog, 
+            icon: const IconText(Icons.edit),
+            tooltip: l10n.editProfileTooltip,
+            onPressed: _showEditProfileDialog,
           ),
         ],
       ),
@@ -276,26 +271,35 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
           children: [
             _buildProfileHeader(),
             const SizedBox(height: 24),
-            
+
             // Body Measurements Section
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Body Measurements', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                Text(
+                  l10n.bodyMeasurements,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 TextButton.icon(
                   onPressed: _showMeasurementsDialog,
-                  icon: const Icon(Icons.straighten),
-                  label: const Text('Edit'),
+                  icon: const IconText(Icons.straighten),
+                  label: Text(l10n.editButton),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             _buildMeasurementsGrid(),
-            
+
             const SizedBox(height: 24),
-            
+
             // Order History Section
-            const Text('Order History', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            Text(
+              l10n.orderHistory,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
             _buildOrderHistoryList(),
           ],
@@ -316,10 +320,18 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
               children: [
                 CircleAvatar(
                   radius: 32,
-                  backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+                  backgroundColor: Theme.of(
+                    context,
+                  ).primaryColor.withValues(alpha: 0.1),
                   child: Text(
-                    _customer.name.isNotEmpty ? _customer.name[0].toUpperCase() : '?',
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Theme.of(context).primaryColor),
+                    _customer.name.isNotEmpty
+                        ? _customer.name[0].toUpperCase()
+                        : '?',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).primaryColor,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -327,29 +339,54 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(_customer.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                      Text(
+                        _customer.name,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       if (_customer.phone.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Row(
                             children: [
-                              const Icon(Icons.phone, size: 16, color: Colors.grey),
+                              const IconText(
+                                Icons.phone,
+                                size: 16,
+                                color: Colors.grey,
+                              ),
                               const SizedBox(width: 4),
-                              Text(_customer.phone, style: const TextStyle(fontSize: 16, color: Colors.grey)),
+                              Text(
+                                _customer.phone,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: Theme.of(context).colorScheme.onSurface
+                                      .withValues(alpha: 0.7),
+                                ),
+                              ),
                             ],
                           ),
                         ),
                       if (_customer.email.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
-                          child: Text(_customer.email, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                          child: Text(
+                            _customer.email,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurface.withValues(alpha: 0.7),
+                            ),
+                          ),
                         ),
                     ],
                   ),
                 ),
                 if (_customer.phone.isNotEmpty)
                   IconButton(
-                    icon: const Icon(Icons.call, color: Colors.green),
+                    icon: const IconText(Icons.call, color: Colors.green),
                     onPressed: () => _launchUrl('tel:${_customer.phone}'),
                   ),
               ],
@@ -358,7 +395,11 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildStatItem('Total Spent', '\$${_customer.totalSpent.toStringAsFixed(0)}', Colors.green),
+                _buildStatItem(
+                  'Total Spent',
+                  '\$${_customer.totalSpent.toStringAsFixed(0)}',
+                  Colors.green,
+                ),
                 _buildStatItem('Orders', '${_customer.orders}', Colors.blue),
               ],
             ),
@@ -371,9 +412,24 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
   Widget _buildStatItem(String label, String value, Color color) {
     return Column(
       children: [
-        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+        Text(
+          label,
+          style: TextStyle(
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurface.withValues(alpha: 0.7),
+            fontSize: 12,
+          ),
+        ),
         const SizedBox(height: 4),
-        Text(value, style: TextStyle(color: color, fontSize: 24, fontWeight: FontWeight.bold)),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ],
     );
   }
@@ -388,7 +444,16 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.grey[300]!),
         ),
-        child: const Center(child: Text('No measurements yet.', style: TextStyle(color: Colors.grey))),
+        child: Center(
+          child: Text(
+            'No measurements yet.',
+            style: TextStyle(
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.7),
+            ),
+          ),
+        ),
       );
     }
 
@@ -409,8 +474,22 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(entry.key, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-              Text(entry.value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Text(
+                entry.key,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.7),
+                ),
+              ),
+              Text(
+                entry.value,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ],
           ),
         );
@@ -426,94 +505,167 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) return const Text('Error loading orders');
-        
+
         final orders = snapshot.data ?? [];
         if (orders.isEmpty) return const Text('No orders found.');
 
-        return ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: orders.length,
-          itemBuilder: (context, index) {
-            final order = orders[index];
-            return Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: ExpansionTile(
-                tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(8),
+        return StreamBuilder<List<ServiceItem>>(
+          stream: _dbService.getServicesStream(),
+          builder: (context, serviceSnapshot) {
+            final serviceByName = {
+              for (final service in serviceSnapshot.data ?? <ServiceItem>[])
+                service.name: service,
+            };
+
+            return ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: orders.length,
+              itemBuilder: (context, index) {
+                final order = orders[index];
+                final summaryOrder = order.items.isNotEmpty
+                    ? CostCalculationService.syncOrderWithServicePrices(
+                        order,
+                        serviceByName: serviceByName,
+                      )
+                    : order;
+
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.receipt_long, color: Colors.blue),
-                ),
-                title: Text(
-                  'Order #${order.id}', 
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: Text(
-                  DateFormat('yyyy-MM-dd').format(order.createdAt!),
-                  style: TextStyle(color: Colors.grey[600]),
-                ),
-                trailing: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text('\$${order.total.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    _buildStatusBadge(order.status),
-                  ],
-                ),
-                children: [
-                  const Divider(),
-                  FutureBuilder<List<OrderItem>>(
-                    future: _dbService.getOrderItems(order.id),
-                    builder: (context, itemSnapshot) {
-                      if (itemSnapshot.connectionState == ConnectionState.waiting) {
-                        return const Padding(
-                          padding: EdgeInsets.all(16.0),
-                          child: Center(child: CircularProgressIndicator()),
-                        );
-                      }
-                      
-                      final items = (itemSnapshot.data != null && itemSnapshot.data!.isNotEmpty)
-                          ? itemSnapshot.data!
-                          : order.items;
-
-                      if (items.isEmpty) {
-                        return const Padding(
-                          padding: EdgeInsets.all(16.0),
-                          child: Text('No items details found'),
-                        );
-                      }
-
-                      return Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        child: Column(
-                          children: items.map((item) => Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    '${item.service} ${item.fabricName != null ? "(${item.fabricName})" : ""}',
-                                    style: const TextStyle(fontSize: 14),
-                                  ),
-                                ),
-                                Text('x${item.quantity}', style: const TextStyle(color: Colors.grey)),
-                                const SizedBox(width: 16),
-                                Text('\$${item.price.toStringAsFixed(0)}'),
-                              ],
-                            ),
-                          )).toList(),
+                  child: ExpansionTile(
+                    tilePadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    leading: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const IconText(
+                        Icons.receipt_long,
+                        color: Colors.blue,
+                      ),
+                    ),
+                    title: Text(
+                      'Order #${order.id}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          DateFormat('yyyy-MM-dd').format(order.createdAt!),
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurface.withValues(alpha: 0.7),
+                          ),
                         ),
-                      );
-                    },
+                        if (order.status != 'completed' &&
+                            order.status != 'cancelled') ...[
+                          const SizedBox(height: 6),
+                          _buildFabricOrderBadge(order.isFabricOrdered),
+                        ],
+                      ],
+                    ),
+                    trailing: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '\$${summaryOrder.total.toStringAsFixed(0)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        _buildStatusBadge(order.status),
+                      ],
+                    ),
+                    children: [
+                      const Divider(),
+                      FutureBuilder<List<OrderItem>>(
+                        future: _dbService.getOrderItems(order.id),
+                        builder: (context, itemSnapshot) {
+                          if (itemSnapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: Center(child: CircularProgressIndicator()),
+                            );
+                          }
+
+                          final items =
+                              (itemSnapshot.data != null &&
+                                  itemSnapshot.data!.isNotEmpty)
+                              ? itemSnapshot.data!
+                              : order.items;
+
+                          if (items.isEmpty) {
+                            return const Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: Text('No items details found'),
+                            );
+                          }
+
+                          final syncedOrder =
+                              CostCalculationService.syncOrderWithServicePrices(
+                                order.copyWith(items: items),
+                                serviceByName: serviceByName,
+                              );
+
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                            child: Column(
+                              children: syncedOrder.items
+                                  .map(
+                                    (item) => Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 4,
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              '${item.service} ${item.fabricName != null ? "(${item.fabricName})" : ""}',
+                                              style: const TextStyle(
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ),
+                                          Text(
+                                            'x${item.quantity}',
+                                            style: TextStyle(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurface
+                                                  .withValues(alpha: 0.7),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 16),
+                                          Text(
+                                            '\$${item.price.toStringAsFixed(0)}',
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             );
           },
         );
@@ -530,6 +682,40 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage> {
     return Text(
       status.toUpperCase(),
       style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold),
+    );
+  }
+
+  Widget _buildFabricOrderBadge(bool isFabricOrdered) {
+    final color = isFabricOrdered ? Colors.green : Colors.red;
+    final backgroundColor = isFabricOrdered ? Colors.green[50] : Colors.red[50];
+    final borderColor = isFabricOrdered ? Colors.green[200]! : Colors.red[200]!;
+    final icon = isFabricOrdered
+        ? Icons.check_circle_outline
+        : Icons.warning_amber_rounded;
+    final label = isFabricOrdered ? 'Fabric Ordered' : 'Fabric Not Ordered';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconText(icon, color: color[700], size: 14),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: color[700],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
