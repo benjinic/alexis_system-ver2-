@@ -159,16 +159,8 @@ class _WorkshopPageState extends State<WorkshopPage> {
   Future<void> _toggleFabricOrdered(WorkshopOrder order) async {
     final nextStatus = !order.isFabricOrdered;
     try {
-      await _dbService.updateWorkshopOrder(
-        order.copyWith(isFabricOrdered: nextStatus, updatedAt: DateTime.now()),
-      );
-
       if (order.orderId.trim().isNotEmpty) {
         await _dbService.updateOrderFabricRequiredItemsStatus(
-          orderId: order.orderId,
-          isFabricOrdered: nextStatus,
-        );
-        await _dbService.updateWorkshopOrdersFabricStatus(
           orderId: order.orderId,
           isFabricOrdered: nextStatus,
         );

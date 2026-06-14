@@ -65,6 +65,34 @@ service cloud.firestore {
         request.resource.data[field] is int;
     }
 
+    function fieldUnchanged(field) {
+      return request.resource.data[field] == resource.data[field];
+    }
+
+    function noSensitiveOrderAggregates() {
+      return !request.resource.data.keys().hasAny([
+        'itemSummary',
+        'fabricSummary',
+        'materialCost',
+        'laborCost',
+        'outsourcingCost',
+        'totalCost',
+        'totalProfit',
+        'isFabricOrdered'
+      ]);
+    }
+
+    function sensitiveOrderAggregatesUnchanged() {
+      return fieldUnchanged('itemSummary') &&
+        fieldUnchanged('fabricSummary') &&
+        fieldUnchanged('materialCost') &&
+        fieldUnchanged('laborCost') &&
+        fieldUnchanged('outsourcingCost') &&
+        fieldUnchanged('totalCost') &&
+        fieldUnchanged('totalProfit') &&
+        fieldUnchanged('isFabricOrdered');
+    }
+
     function validOrder() {
       return hasOnlyFields([
           'uniqueId',
@@ -103,8 +131,6 @@ service cloud.firestore {
           'total',
           'deposit',
           'balance',
-          'totalCost',
-          'totalProfit',
           'status',
           'paymentMethod'
         ]) &&
@@ -116,8 +142,6 @@ service cloud.firestore {
         numberField('total') &&
         numberField('deposit') &&
         numberField('balance') &&
-        numberField('totalCost') &&
-        numberField('totalProfit') &&
         stringField('status') &&
         stringField('paymentMethod') &&
         optionalString('itemSummary') &&
@@ -129,6 +153,8 @@ service cloud.firestore {
         optionalNumber('laborCost') &&
         optionalNumber('outsourcingCost') &&
         optionalNumber('fixedCost') &&
+        optionalNumber('totalCost') &&
+        optionalNumber('totalProfit') &&
         optionalTimestampOrInt('createdAt') &&
         optionalTimestampOrInt('updatedAt') &&
         optionalTimestampOrInt('date') &&
@@ -152,7 +178,8 @@ service cloud.firestore {
           'serviceName',
           'fabricCode',
           'fabricCost',
-          'fabricUsage'
+          'fabricUsage',
+          'updatedAt'
         ]) &&
         hasRequiredFields(['id', 'orderId', 'service', 'price', 'quantity']) &&
         stringField('id') &&
@@ -169,7 +196,8 @@ service cloud.firestore {
         optionalString('serviceName') &&
         optionalString('fabricCode') &&
         optionalNumber('fabricCost') &&
-        optionalNumber('fabricUsage');
+        optionalNumber('fabricUsage') &&
+        optionalTimestampOrInt('updatedAt');
     }
 
     function validInventoryItem() {
@@ -286,17 +314,15 @@ service cloud.firestore {
     }
 
     function validSetting(settingId) {
-      return (settingId == 'order_counter' &&
-          hasOnlyFields(['current_id']) &&
-          intField('current_id')) ||
-        (settingId == 'measurements' &&
+      return settingId == 'measurements' &&
           hasOnlyFields(['fields']) &&
-          optionalList('fields'));
+          optionalList('fields');
     }
 
     match /orders/{orderId} {
       allow read: if signedIn();
-      allow create, update: if signedIn() && validOrder();
+      allow create: if signedIn() && validOrder() && noSensitiveOrderAggregates();
+      allow update: if signedIn() && validOrder() && sensitiveOrderAggregatesUnchanged();
       allow delete: if signedIn();
     }
 
@@ -314,13 +340,25 @@ service cloud.firestore {
 
     match /workshop_orders/{workshopOrderId} {
       allow read: if signedIn();
-      allow create, update: if signedIn() && validWorkshopOrder();
+      allow create: if signedIn() &&
+        validWorkshopOrder() &&
+        (!(request.resource.data.isFabricOrdered == true));
+      allow update: if signedIn() &&
+        validWorkshopOrder() &&
+        fieldUnchanged('isFabricOrdered');
       allow delete: if signedIn();
     }
 
     match /customers/{customerId} {
       allow read: if signedIn();
-      allow create, update: if signedIn() && validCustomer();
+      allow create: if signedIn() &&
+        validCustomer() &&
+        request.resource.data.orders == 0 &&
+        request.resource.data.totalSpent == 0;
+      allow update: if signedIn() &&
+        validCustomer() &&
+        fieldUnchanged('orders') &&
+        fieldUnchanged('totalSpent');
       allow delete: if signedIn();
     }
 

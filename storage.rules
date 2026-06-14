@@ -2,8 +2,42 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function validImageUpload() {
+      return request.resource != null &&
+        request.resource.size <= 5 * 1024 * 1024 &&
+        request.resource.contentType in [
+          'image/jpeg',
+          'image/png',
+          'image/webp'
+        ];
+    }
+
+    function validImageFileName(fileName) {
+      return fileName.matches('.*[.](jpg|jpeg|png|webp|JPG|JPEG|PNG|WEBP)$');
+    }
+
     match /order_images/{orderId}/{fileName} {
-      allow read, write: if request.auth != null;
+      allow read: if signedIn();
+      allow create, update: if signedIn() &&
+        validImageUpload() &&
+        validImageFileName(fileName);
+      allow delete: if signedIn();
+    }
+
+    match /fabric_images/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() &&
+        validImageUpload() &&
+        validImageFileName(fileName);
+      allow delete: if signedIn();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }

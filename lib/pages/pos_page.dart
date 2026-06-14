@@ -43,7 +43,6 @@ class _POSPageState extends State<POSPage> {
   final TextEditingController _fixedCostController = TextEditingController();
 
   String? _selectedCustomerId;
-  Customer? _selectedCustomer;
 
   bool _isLoading = false;
   String _selectedPaymentMethod = 'Cash';
@@ -315,7 +314,6 @@ class _POSPageState extends State<POSPage> {
                                   onTap: () {
                                     setState(() {
                                       _selectedCustomerId = customer.id;
-                                      _selectedCustomer = customer;
                                       _customerNameController.text =
                                           customer.name;
                                     });
@@ -571,22 +569,14 @@ class _POSPageState extends State<POSPage> {
       String customerId = '';
       if (_selectedCustomerId != null) {
         customerId = _selectedCustomerId!;
-        if (_selectedCustomer != null) {
-          await _dbService.updateCustomer(
-            _selectedCustomer!.copyWith(
-              orders: _selectedCustomer!.orders + 1,
-              totalSpent: _selectedCustomer!.totalSpent + total,
-            ),
-          );
-        }
       } else if (!isEditMode && customerId.isEmpty) {
         final newCustomer = Customer(
           id: '',
           name: finalCustomerName,
           email: '',
           phone: '',
-          orders: 1,
-          totalSpent: total,
+          orders: 0,
+          totalSpent: 0,
         );
         customerId = await _dbService.addCustomer(newCustomer);
       }
@@ -888,7 +878,6 @@ class _POSPageState extends State<POSPage> {
             _depositController.clear();
             _balancePaymentController.clear();
             _fixedCostController.clear();
-            _selectedCustomer = null;
             _selectedCustomerId = null;
             _selectedPaymentMethod = 'Cash';
           });

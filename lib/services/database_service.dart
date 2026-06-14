@@ -1,7 +1,11 @@
+import 'dart:convert';
 import 'dart:developer' as developer;
 
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
+import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:http/http.dart' as http;
 import '../models/order.dart';
 import '../models/material_item.dart';
 import '../models/workshop_order.dart';
@@ -12,6 +16,9 @@ import 'fabric_order_status_sync.dart';
 
 class DatabaseService implements DatabaseServiceInterface {
   static const String _logName = 'DatabaseService';
+  static final Uri _allocateOrderIdUri = Uri.parse(
+    'https://us-central1-alexis-tailor-system-2025.cloudfunctions.net/allocateOrderId',
+  );
 
   void _log(String message, {Object? error, StackTrace? stackTrace}) {
     developer.log(
@@ -40,6 +47,64 @@ class DatabaseService implements DatabaseServiceInterface {
       .collection('order_images');
 
   // === 1. Orders (訂單) ===
+
+  Future<Map<String, String>> _functionAuthHeaders() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw Exception('Please sign in before creating an order.');
+    }
+
+    final idToken = await user.getIdToken();
+    final appCheckToken = await FirebaseAppCheck.instance.getToken();
+    if (idToken == null || idToken.isEmpty) {
+      throw Exception('Unable to get Firebase ID token.');
+    }
+    if (appCheckToken == null || appCheckToken.isEmpty) {
+      throw Exception('Unable to get Firebase App Check token.');
+    }
+
+    return {
+      'Authorization': 'Bearer $idToken',
+      'X-Firebase-AppCheck': appCheckToken,
+      'Content-Type': 'application/json',
+    };
+  }
+
+  Future<String> _allocateOrderId() async {
+    final response = await http.post(
+      _allocateOrderIdUri,
+      headers: await _functionAuthHeaders(),
+      body: '{}',
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Failed to allocate order ID (${response.statusCode}): ${response.body}',
+      );
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final orderId = data['orderId']?.toString();
+    if (orderId == null || orderId.isEmpty) {
+      throw Exception('Function did not return an order ID.');
+    }
+
+    return orderId;
+  }
+
+  Map<String, dynamic> _clientWritableOrderData(Order order) {
+    final orderData = order.toJson();
+    orderData.remove('items');
+    orderData.remove('itemSummary');
+    orderData.remove('fabricSummary');
+    orderData.remove('materialCost');
+    orderData.remove('laborCost');
+    orderData.remove('outsourcingCost');
+    orderData.remove('totalCost');
+    orderData.remove('totalProfit');
+    orderData.remove('isFabricOrdered');
+    return orderData;
+  }
 
   // 取得訂單列表 (只讀取主文件，不含詳細 Items，以節省流量)
   // Get orders stream with optional limit parameter (default: no limit for backward compatibility)
@@ -213,203 +278,67 @@ class DatabaseService implements DatabaseServiceInterface {
     }
   }
 
-  // 新增訂單 (寫入 orders + 寫入 order_items + 更新 customers)
+  // 新增訂單 (寫入 orders + order_items；聚合欄位由 Cloud Functions 同步)
   Future<String> addOrder(Order order) async {
-    final counterRef = _firestore.collection('settings').doc('order_counter');
+    final customId = await _allocateOrderId();
+    final batch = _firestore.batch();
 
-    DocumentReference? customerRef;
-    if (order.customerId.isNotEmpty) {
-      customerRef = _customersRef.doc(order.customerId);
+    batch.set(_ordersRef.doc(customId), _clientWritableOrderData(order));
+
+    for (final item in order.items) {
+      final itemRef = _orderItemsRef.doc();
+      final itemData = item.toJson();
+      itemData['orderId'] = customId;
+      batch.set(itemRef, itemData);
     }
 
-    return await _firestore.runTransaction((transaction) async {
-      // === 1. 讀取階段 ===
-      DocumentSnapshot counterSnapshot;
-      try {
-        counterSnapshot = await transaction.get(counterRef);
-      } catch (e, stackTrace) {
-        _log(
-          'Notice: Counter read failed, using default.',
-          error: e,
-          stackTrace: stackTrace,
-        );
-        rethrow;
-      }
-
-      DocumentSnapshot? customerSnapshot;
-      if (customerRef != null) {
-        try {
-          customerSnapshot = await transaction.get(customerRef);
-        } catch (e) {
-          _log('Warning: Failed to read customer data: $e', error: e);
-        }
-      }
-
-      // === 2. 邏輯計算 ===
-      int nextId = 14038;
-      if (counterSnapshot.exists) {
-        final data = counterSnapshot.data() as Map<String, dynamic>;
-        int currentId = data['current_id'] ?? 14037;
-        nextId = currentId + 1;
-      }
-
-      int? newCustomerOrders;
-      double? newCustomerTotal;
-
-      if (customerSnapshot != null && customerSnapshot.exists) {
-        final customerData = customerSnapshot.data() as Map<String, dynamic>;
-        int currentOrders = (customerData['orders'] is int)
-            ? customerData['orders']
-            : 0;
-
-        double currentTotal = 0.0;
-        if (customerData['totalSpent'] is num) {
-          currentTotal = (customerData['totalSpent'] as num).toDouble();
-        } else if (customerData['totalSpent'] is String) {
-          currentTotal =
-              double.tryParse(customerData['totalSpent'] as String) ?? 0.0;
-        }
-
-        newCustomerOrders = currentOrders + 1;
-        newCustomerTotal = currentTotal + order.total;
-      }
-
-      String summary = order.items.map((i) => i.service).join(', ');
-      if (summary.length > 50) summary = '${summary.substring(0, 47)}...';
-      final fabricNames = order.items
-          .map((i) => i.fabricName ?? '')
-          .where((n) => n.isNotEmpty)
-          .toSet()
-          .join(', ');
-
-      // === 3. 寫入階段 ===
-
-      // A. 更新計數器
-      transaction.set(counterRef, {'current_id': nextId});
-
-      // B. 寫入主訂單 (orders)
-      String customId = nextId.toString(); // 這是本次產生的 Order ID
-      final newOrderRef = _ordersRef.doc(customId);
-
-      Map<String, dynamic> orderData = order.toJson();
-      orderData['itemSummary'] = summary;
-      orderData['fabricSummary'] = fabricNames;
-      orderData.remove('items'); // 移除 items 陣列
-
-      transaction.set(newOrderRef, orderData);
-
-      // C. 寫入訂單項目 (order_items)
-      for (var item in order.items) {
-        DocumentReference itemRef = _orderItemsRef.doc(); // 自動產生 ID
-
-        // 重要：補上 orderId，這樣才能關聯回去
-        Map<String, dynamic> itemData = item.toJson();
-        itemData['orderId'] = customId;
-
-        transaction.set(itemRef, itemData);
-      }
-
-      // D. 更新客戶
-      if (customerRef != null && newCustomerOrders != null) {
-        transaction.update(customerRef, {
-          'orders': newCustomerOrders,
-          'totalSpent': newCustomerTotal,
-        });
-      }
-
-      return customId;
-    });
+    await batch.commit();
+    return customId;
   }
 
-  // 更新訂單 (主要更新主文件狀態)
-  // 更新訂單 (完整版：同步更新細項、主檔與客戶消費額)
+  // 更新訂單：client 只寫輸入欄位；成本/利潤/布料狀態由 Cloud Functions 同步。
   Future<void> updateOrder(Order order) async {
     try {
-      // 1. 先讀取舊訂單資料 (為了計算金額差額)
       final oldOrderDoc = await _ordersRef.doc(order.id).get();
       if (!oldOrderDoc.exists) {
         throw Exception("Order to update not found!");
       }
 
-      final oldOrderData = oldOrderDoc.data() as Map<String, dynamic>;
-
-      // 確保數值安全轉換
-      double oldTotal = (oldOrderData['total'] is num)
-          ? (oldOrderData['total'] as num).toDouble()
-          : double.tryParse(oldOrderData['total'].toString()) ?? 0.0;
-
-      // 計算差額 (新金額 - 舊金額)
-      // 例如：原本 1000，改成 1200 -> 差額 +200
-      // 例如：原本 1000，改成 800  -> 差額 -200
-      double diff = order.total - oldTotal;
-
-      // 2. 開始批次寫入 (Batch) - 確保所有變更同時生效
       WriteBatch batch = _firestore.batch();
 
-      // A. 更新主訂單 (Orders Collection)
-      Map<String, dynamic> orderData = order.toJson();
+      batch.update(_ordersRef.doc(order.id), _clientWritableOrderData(order));
 
-      // 重新生成商品摘要 (例如 "Suit, Shirt...")
-      String summary = order.items.map((i) => i.service).join(', ');
-      if (summary.length > 50) summary = '${summary.substring(0, 47)}...';
-      orderData['itemSummary'] = summary;
-      orderData['fabricSummary'] = order.items
-          .map((i) => i.fabricName ?? '')
-          .where((n) => n.isNotEmpty)
-          .toSet()
-          .join(', ');
-
-      // 移除 items 陣列 (因為主檔不存細項，這是正規化設計)
-      orderData.remove('items');
-
-      batch.update(_ordersRef.doc(order.id), orderData);
-
-      // B. 更新客戶累積消費 (Customers Collection)
-      // 只有當金額有變動，且有關聯客戶時才更新
-      if (diff != 0 && order.customerId.isNotEmpty) {
-        batch.update(_customersRef.doc(order.customerId), {
-          'totalSpent': FieldValue.increment(diff),
-        });
-      }
-
-      // C. 重建訂單細項 (Order Items Collection)
-      // 策略：先查詢並刪除所有舊的，再寫入新的。這比「比對差異」更安全且簡單。
-
-      // C-1. 找出舊的細項
       final oldItemsSnapshot = await _orderItemsRef
           .where('orderId', isEqualTo: order.id)
           .get();
 
-      // C-2. 全部刪除
       for (var doc in oldItemsSnapshot.docs) {
         batch.delete(doc.reference);
       }
 
-      // C-3. 寫入新的細項
       for (var item in order.items) {
-        DocumentReference itemRef = _orderItemsRef.doc(); // 自動產生新 ID
+        DocumentReference itemRef = _orderItemsRef.doc();
         Map<String, dynamic> itemData = item.toJson();
-        itemData['orderId'] = order.id; // 綁定訂單 ID
+        itemData['orderId'] = order.id;
         batch.set(itemRef, itemData);
       }
 
-      // 3. 提交所有變更
       await batch.commit();
     } catch (e, stackTrace) {
       _log('Error updating order: $e', error: e, stackTrace: stackTrace);
-      rethrow; // 拋出錯誤讓 UI 層顯示 SnackBar
+      rethrow;
     }
   }
 
-  // 只更新訂單主檔的布料下單狀態，避免重建 order_items。
+  // 保留舊呼叫點；實際同步改由 order_items trigger 聚合到 orders/workshop_orders。
   Future<void> updateOrderFabricStatus({
     required String orderId,
     required bool isFabricOrdered,
   }) async {
-    await _ordersRef.doc(orderId).update({
-      'isFabricOrdered': isFabricOrdered,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await updateOrderFabricRequiredItemsStatus(
+      orderId: orderId,
+      isFabricOrdered: isFabricOrdered,
+    );
   }
 
   // 批量更新同一訂單內所有需要布料的細項，並同步主訂單布料狀態。
@@ -438,12 +367,9 @@ class DatabaseService implements DatabaseServiceInterface {
       });
     }
 
-    batch.update(_ordersRef.doc(orderId), {
-      'isFabricOrdered': hasFabricRequiredItems && isFabricOrdered,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    await batch.commit();
+    if (hasFabricRequiredItems) {
+      await batch.commit();
+    }
   }
 
   // 只更新訂單成本拆解中的 Material / Outsourcing，並同步重算總成本與利潤。
@@ -456,26 +382,9 @@ class DatabaseService implements DatabaseServiceInterface {
       throw Exception('Cost values cannot be negative.');
     }
 
-    final orderRef = _ordersRef.doc(orderId);
-    final snapshot = await orderRef.get();
-    if (!snapshot.exists || snapshot.data() == null) {
-      throw Exception('Order not found.');
-    }
-
-    final data = snapshot.data() as Map<String, dynamic>;
-    final fixedCost = (data['fixedCost'] as num?)?.toDouble() ?? 0.0;
-    final totalRevenue = (data['total'] as num?)?.toDouble() ?? 0.0;
-
-    final totalCost = materialCost + outsourcingCost + fixedCost;
-    final totalProfit = totalRevenue - totalCost;
-
-    await orderRef.update({
-      'materialCost': materialCost,
-      'outsourcingCost': outsourcingCost,
-      'totalCost': totalCost,
-      'totalProfit': totalProfit,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    throw UnsupportedError(
+      'Order cost aggregates are now recalculated by Cloud Functions.',
+    );
   }
 
   // 更新單一訂單細項的訂料狀態，並同步主訂單聚合狀態。
@@ -499,56 +408,19 @@ class DatabaseService implements DatabaseServiceInterface {
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
-    final orderItemsSnapshot = await _orderItemsRef
-        .where('orderId', isEqualTo: orderId)
-        .get();
-
-    final itemMaps = orderItemsSnapshot.docs
-        .map((doc) => doc.data() as Map<String, dynamic>)
-        .toList();
-
-    final allFabricOrdered = FabricOrderStatusSync.areAllRequiredItemsOrdered(
-      itemMaps,
-    );
-
-    await _ordersRef.doc(orderId).update({
-      'isFabricOrdered': allFabricOrdered,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    // The order/workshop aggregate flag is recalculated by Cloud Functions.
   }
 
-  // Optimized delete order: updates customer stats and cleans up items atomically
+  // Delete order and order_items; customer aggregates are recalculated by Cloud Functions.
   Future<void> deleteOrder(String orderId) async {
     try {
-      // 1. Fetch order data to know customer ID and order total
       final orderDoc = await _ordersRef.doc(orderId).get();
       if (!orderDoc.exists) return;
 
-      final orderData = orderDoc.data() as Map<String, dynamic>;
-      final String customerId = orderData['customerId'] ?? '';
-      // Safe type conversion for total amount
-      final double totalAmount = (orderData['total'] is num)
-          ? (orderData['total'] as num).toDouble()
-          : double.tryParse(orderData['total'].toString()) ?? 0.0;
-
-      // Use batch for atomic transaction: all succeed or all fail
       WriteBatch batch = _firestore.batch();
 
-      // 2. Update customer stats (decrement orders count and total spent)
-      if (customerId.isNotEmpty) {
-        final customerRef = _customersRef.doc(customerId);
-        batch.update(customerRef, {
-          'orders': FieldValue.increment(-1), // Decrement order count
-          'totalSpent': FieldValue.increment(
-            -totalAmount,
-          ), // Subtract order amount
-        });
-      }
-
-      // 3. Delete main order document
       batch.delete(_ordersRef.doc(orderId));
 
-      // 4. Delete associated order items
       final itemsSnapshot = await _orderItemsRef
           .where('orderId', isEqualTo: orderId)
           .get();
@@ -556,11 +428,10 @@ class DatabaseService implements DatabaseServiceInterface {
         batch.delete(doc.reference);
       }
 
-      // 5. Commit all changes atomically
       await batch.commit();
     } catch (e, stackTrace) {
       _log('Error deleting order: $e', error: e, stackTrace: stackTrace);
-      rethrow; // Re-throw for UI layer error handling
+      rethrow;
     }
   }
 
@@ -672,15 +543,8 @@ class DatabaseService implements DatabaseServiceInterface {
     required String orderId,
     required bool isFabricOrdered,
   }) async {
-    final snapshot = await _workshopRef
-        .where('orderId', isEqualTo: orderId)
-        .get();
-    if (snapshot.docs.isEmpty) return;
-    final batch = _firestore.batch();
-    for (final doc in snapshot.docs) {
-      batch.update(doc.reference, {'isFabricOrdered': isFabricOrdered});
-    }
-    await batch.commit();
+    // No-op: workshop fabric aggregate is synced by Cloud Functions from
+    // order_items, keeping client writes out of aggregate fields.
   }
 
   Future<void> updateWorkshopOrderStatus(String id, String status) async {
@@ -798,9 +662,7 @@ class DatabaseService implements DatabaseServiceInterface {
 
   // 設定下一個訂單號碼
   Future<void> setNextOrderNumber(int newId) async {
-    await _firestore.collection('settings').doc('order_counter').set({
-      'current_id': newId,
-    }, SetOptions(merge: true));
+    throw UnsupportedError('Order counter is managed by Cloud Functions.');
   }
 
   // === 6. Services (服務項目) ===

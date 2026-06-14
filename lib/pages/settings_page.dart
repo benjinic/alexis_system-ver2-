@@ -163,27 +163,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // 更新訂單號碼
   Future<void> _updateOrderNumber() async {
-    final newId = int.tryParse(_orderIdController.text);
-    if (newId != null && newId > 0) {
-      await _dbService.setNextOrderNumber(newId);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Next Order ID set to #$newId'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Invalid Order ID'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Order ID counter is now managed by Cloud Functions.'),
+      ),
+    );
   }
 
   Future<void> _saveAllSettings() async {
@@ -218,10 +202,6 @@ class _SettingsPageState extends State<SettingsPage> {
         _settingsService.setCardTitleColor(_cardTitleColor.toARGB32()),
         _settingsService.setSidebarTextColor(_sidebarTextColor.toARGB32()),
       ]);
-
-      if (parsedOrderId != null) {
-        await _dbService.setNextOrderNumber(parsedOrderId);
-      }
 
       // Reload from persisted sources to ensure UI matches actual saved values.
       await _loadPreferences();
@@ -880,6 +860,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Expanded(
                   child: TextField(
                     controller: _orderIdController,
+                    readOnly: true,
                     decoration: InputDecoration(
                       labelText: l10n.nextOrderNumber,
                       prefixIcon: const IconText(Icons.confirmation_number),

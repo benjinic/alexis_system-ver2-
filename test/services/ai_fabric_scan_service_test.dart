@@ -59,6 +59,7 @@ void main() {
       late http.Request capturedRequest;
       final service = AiFabricScanService(
         idTokenProvider: () async => 'test-token',
+        appCheckTokenProvider: () async => 'test-app-check-token',
         proxyUri: Uri.parse('https://example.test/gemini'),
         client: MockClient((request) async {
           capturedRequest = request;
@@ -67,6 +68,10 @@ void main() {
           final imagePart = parts[1]['inlineData'] as Map<String, dynamic>;
 
           expect(request.headers['Authorization'], 'Bearer test-token');
+          expect(
+            request.headers['X-Firebase-AppCheck'],
+            'test-app-check-token',
+          );
           expect(request.headers['Content-Type'], 'application/json');
           expect(imagePart['mimeType'], 'image/png');
           expect(imagePart['data'], isNotEmpty);
@@ -105,6 +110,7 @@ void main() {
     test('throws when token provider returns empty token', () async {
       final service = AiFabricScanService(
         idTokenProvider: () async => '',
+        appCheckTokenProvider: () async => 'test-app-check-token',
         client: MockClient((_) async => http.Response('{}', 200)),
       );
 
@@ -120,6 +126,7 @@ void main() {
     test('throws on proxy error', () async {
       final service = AiFabricScanService(
         idTokenProvider: () async => 'test-token',
+        appCheckTokenProvider: () async => 'test-app-check-token',
         client: MockClient((_) async => http.Response('Unauthorized', 401)),
       );
 

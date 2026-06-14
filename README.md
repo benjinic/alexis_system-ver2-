@@ -159,7 +159,7 @@ flutter test
 **步驟四：建置 Web Release 版本**
 
 ```bash
-flutter build web --release --no-tree-shake-icons --no-wasm-dry-run
+flutter build web --release --no-tree-shake-icons --no-wasm-dry-run --dart-define=FIREBASE_APPCHECK_RECAPTCHA_KEY=<site-key>
 ```
 
 > `--no-tree-shake-icons`：避免 CupertinoIcons 字型 tree-shaking 導致 build 失敗。
@@ -180,7 +180,7 @@ firebase login --reauth
 **步驟六：部署到 Firebase Hosting**
 
 ```bash
-firebase deploy --only hosting --project alexis-tailor-system-2025
+firebase deploy --only functions,firestore:rules,storage,hosting --project alexis-tailor-system-2025
 ```
 
 > 如需同時部署 Firestore Rules 或 Storage Rules：
@@ -204,7 +204,16 @@ firebase functions:secrets:set GEMINI_API_KEY --project alexis-tailor-system-202
 firebase deploy --only functions --project alexis-tailor-system-2025
 ```
 
-`geminiProxy` 與 `listGeminiModels` 會驗證 Firebase ID token；前端呼叫時必須帶 `Authorization: Bearer <Firebase ID token>`。
+`geminiProxy`、`listGeminiModels` 與 `allocateOrderId` 會驗證 Firebase ID token、Firebase App Check token，並套用每分鐘 rate limit。前端呼叫時必須帶：
+
+- `Authorization: Bearer <Firebase ID token>`
+- `X-Firebase-AppCheck: <Firebase App Check token>`
+
+Web build 時必須提供 Firebase App Check reCAPTCHA v3 site key：
+
+```bash
+flutter build web --release --no-tree-shake-icons --no-wasm-dry-run --dart-define=FIREBASE_APPCHECK_RECAPTCHA_KEY=<site-key>
+```
 
 ### SSR Function Secret 設定
 
@@ -227,23 +236,22 @@ SSR Functions 的 service account private key 需放在 Firebase Secret Manager�
 
 ```bash
 node tool/audit_functions_env.js
-node tool/smoke_gemini_proxy.js
+FIREBASE_APPCHECK_TOKEN=<token> node tool/smoke_gemini_proxy.js
 ```
 
 `audit_functions_env.js` 只輸出 env key 名稱，不輸出 secret value；若發現 plain sensitive env，會以非 0 exit code 結束。
 
-`smoke_gemini_proxy.js` 會建立臨時 Firebase anonymous user 測試 authenticated proxy，完成後會刪除臨時 user。
+`smoke_gemini_proxy.js` 會建立臨時 Firebase anonymous user 測試 authenticated proxy，完成後會刪除臨時 user。因為 proxy 已啟用 App Check，執行前需提供有效 `FIREBASE_APPCHECK_TOKEN`。
 
 完整部署檢查流程：
 
 ```bash
 flutter analyze
 flutter test
-flutter build web --release --no-tree-shake-icons --no-wasm-dry-run
-firebase deploy --only functions --project alexis-tailor-system-2025
-firebase deploy --only hosting --project alexis-tailor-system-2025
+flutter build web --release --no-tree-shake-icons --no-wasm-dry-run --dart-define=FIREBASE_APPCHECK_RECAPTCHA_KEY=<site-key>
+firebase deploy --only functions,firestore:rules,storage,hosting --project alexis-tailor-system-2025
 node tool/audit_functions_env.js
-node tool/smoke_gemini_proxy.js
+FIREBASE_APPCHECK_TOKEN=<token> node tool/smoke_gemini_proxy.js
 ```
 
 ## Web 字型自救方案（MaterialIcons 無法顯示）

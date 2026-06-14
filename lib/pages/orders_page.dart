@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../components/icon_text.dart';
 import 'package:intl/intl.dart';
-import 'dart:async';
 import 'dart:convert';
 import 'package:universal_html/html.dart' as html;
 
@@ -490,14 +489,6 @@ class _OrdersPageState extends State<OrdersPage> {
                                       dialogFabricOrdered = allFabricOrdered;
                                     });
                                   });
-
-                                  // Keep order-level flag aligned for lists/filters that still rely on it.
-                                  unawaited(
-                                    _dbService.updateOrderFabricStatus(
-                                      orderId: order.id,
-                                      isFabricOrdered: allFabricOrdered,
-                                    ),
-                                  );
                                 }
                                 final totalProfit =
                                     detailOrder.total - detailOrder.totalCost;

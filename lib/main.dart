@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
@@ -23,12 +24,27 @@ import 'screens/customers_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await _initializeAppCheck();
   await SettingsService().initialize();
   runApp(
     MultiProvider(
       providers: [ChangeNotifierProvider(create: (_) => CartProvider())],
       child: const AlexisSystemApp(),
     ),
+  );
+}
+
+Future<void> _initializeAppCheck() async {
+  const recaptchaSiteKey = String.fromEnvironment(
+    'FIREBASE_APPCHECK_RECAPTCHA_KEY',
+  );
+
+  await FirebaseAppCheck.instance.activate(
+    providerWeb: recaptchaSiteKey.isEmpty
+        ? null
+        : ReCaptchaV3Provider(recaptchaSiteKey),
+    providerAndroid: const AndroidPlayIntegrityProvider(),
+    providerApple: const AppleAppAttestWithDeviceCheckFallbackProvider(),
   );
 }
 
@@ -56,9 +72,11 @@ class _AlexisSystemAppState extends State<AlexisSystemApp> {
       builder: (context, child) {
         final accentColor = _settingsService.accentColorNotifier.value;
         final textColor = _settingsService.textColorNotifier.value;
-        final headingTextColor = _settingsService.headingTextColorNotifier.value;
+        final headingTextColor =
+            _settingsService.headingTextColorNotifier.value;
         final cardTitleColor = _settingsService.cardTitleColorNotifier.value;
-        final sidebarTextColor = _settingsService.sidebarTextColorNotifier.value;
+        final sidebarTextColor =
+            _settingsService.sidebarTextColorNotifier.value;
         final locale = _settingsService.localeNotifier.value;
         return MaterialApp(
           title: 'Alexis Tailor System',
@@ -88,28 +106,30 @@ class _AlexisSystemAppState extends State<AlexisSystemApp> {
               surface: const Color(0xFF1E1E2C),
               onSurface: textColor,
             ),
-            textTheme: ThemeData.dark().textTheme.apply(
-              bodyColor: textColor,
-              displayColor: headingTextColor,
-            ).merge(TextTheme(
-              titleLarge: TextStyle(color: cardTitleColor),
-              titleMedium: TextStyle(color: cardTitleColor),
-              titleSmall: TextStyle(color: cardTitleColor),
-              labelLarge: TextStyle(color: cardTitleColor),
-              labelMedium: TextStyle(color: cardTitleColor),
-              labelSmall: TextStyle(color: cardTitleColor),
-            )),
-            primaryTextTheme: ThemeData.dark().primaryTextTheme.apply(
-              bodyColor: textColor,
-              displayColor: headingTextColor,
-            ).merge(TextTheme(
-              titleLarge: TextStyle(color: cardTitleColor),
-              titleMedium: TextStyle(color: cardTitleColor),
-              titleSmall: TextStyle(color: cardTitleColor),
-              labelLarge: TextStyle(color: cardTitleColor),
-              labelMedium: TextStyle(color: cardTitleColor),
-              labelSmall: TextStyle(color: cardTitleColor),
-            )),
+            textTheme: ThemeData.dark().textTheme
+                .apply(bodyColor: textColor, displayColor: headingTextColor)
+                .merge(
+                  TextTheme(
+                    titleLarge: TextStyle(color: cardTitleColor),
+                    titleMedium: TextStyle(color: cardTitleColor),
+                    titleSmall: TextStyle(color: cardTitleColor),
+                    labelLarge: TextStyle(color: cardTitleColor),
+                    labelMedium: TextStyle(color: cardTitleColor),
+                    labelSmall: TextStyle(color: cardTitleColor),
+                  ),
+                ),
+            primaryTextTheme: ThemeData.dark().primaryTextTheme
+                .apply(bodyColor: textColor, displayColor: headingTextColor)
+                .merge(
+                  TextTheme(
+                    titleLarge: TextStyle(color: cardTitleColor),
+                    titleMedium: TextStyle(color: cardTitleColor),
+                    titleSmall: TextStyle(color: cardTitleColor),
+                    labelLarge: TextStyle(color: cardTitleColor),
+                    labelMedium: TextStyle(color: cardTitleColor),
+                    labelSmall: TextStyle(color: cardTitleColor),
+                  ),
+                ),
             cardTheme: CardThemeData(
               color: const Color(0xFF1E1E2C),
               elevation: 0,
@@ -139,10 +159,18 @@ class _AlexisSystemAppState extends State<AlexisSystemApp> {
               hintStyle: TextStyle(color: Colors.grey[500]),
             ),
             navigationRailTheme: NavigationRailThemeData(
-              selectedLabelTextStyle: TextStyle(color: sidebarTextColor, fontSize: 11),
-              unselectedLabelTextStyle: TextStyle(color: sidebarTextColor.withValues(alpha: 0.6), fontSize: 11),
+              selectedLabelTextStyle: TextStyle(
+                color: sidebarTextColor,
+                fontSize: 11,
+              ),
+              unselectedLabelTextStyle: TextStyle(
+                color: sidebarTextColor.withValues(alpha: 0.6),
+                fontSize: 11,
+              ),
               selectedIconTheme: IconThemeData(color: sidebarTextColor),
-              unselectedIconTheme: IconThemeData(color: sidebarTextColor.withValues(alpha: 0.6)),
+              unselectedIconTheme: IconThemeData(
+                color: sidebarTextColor.withValues(alpha: 0.6),
+              ),
             ),
           ),
 
@@ -166,8 +194,10 @@ class _AlexisSystemAppState extends State<AlexisSystemApp> {
             ),
             '/workshop': (context) =>
                 MainLayout(currentRoute: '/workshop', child: WorkshopPage()),
-            '/settings': (context) =>
-                const MainLayout(currentRoute: '/settings', child: SettingsPage()),
+            '/settings': (context) => const MainLayout(
+              currentRoute: '/settings',
+              child: SettingsPage(),
+            ),
           },
           onUnknownRoute: (settings) =>
               MaterialPageRoute(builder: (_) => const NotFoundPage()),

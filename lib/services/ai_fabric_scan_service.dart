@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 
@@ -29,10 +30,13 @@ class AiFabricScanService {
   AiFabricScanService({
     http.Client? client,
     Future<String?> Function()? idTokenProvider,
+    Future<String?> Function()? appCheckTokenProvider,
     Uri? proxyUri,
   }) : _client = client ?? http.Client(),
        _ownsClient = client == null,
        _idTokenProvider = idTokenProvider ?? _firebaseIdTokenProvider,
+       _appCheckTokenProvider =
+           appCheckTokenProvider ?? _firebaseAppCheckTokenProvider,
        _proxyUri = proxyUri ?? _defaultProxyUri;
 
   static final Uri _defaultProxyUri = Uri.parse(
@@ -42,6 +46,7 @@ class AiFabricScanService {
   final http.Client _client;
   final bool _ownsClient;
   final Future<String?> Function() _idTokenProvider;
+  final Future<String?> Function() _appCheckTokenProvider;
   final Uri _proxyUri;
 
   static const String _prompt = '''
@@ -62,11 +67,16 @@ class AiFabricScanService {
     if (idToken == null || idToken.isEmpty) {
       throw const AiFabricScanException('請先登入後再使用 AI 辨識。');
     }
+    final appCheckToken = await _appCheckTokenProvider();
+    if (appCheckToken == null || appCheckToken.isEmpty) {
+      throw const AiFabricScanException('無法取得 App Check 驗證，請重新整理後再試。');
+    }
 
     final response = await _client.post(
       _proxyUri,
       headers: {
         'Authorization': 'Bearer $idToken',
+        'X-Firebase-AppCheck': appCheckToken,
         'Content-Type': 'application/json',
       },
       body: jsonEncode({
@@ -141,6 +151,15 @@ class AiFabricScanService {
     }
 
     return idToken;
+  }
+
+  static Future<String?> _firebaseAppCheckTokenProvider() async {
+    final appCheckToken = await FirebaseAppCheck.instance.getToken();
+    if (appCheckToken == null || appCheckToken.isEmpty) {
+      throw const AiFabricScanException('無法取得 App Check 驗證，請重新整理後再試。');
+    }
+
+    return appCheckToken;
   }
 
   static String? _extractCandidateText(Map<String, dynamic> response) {

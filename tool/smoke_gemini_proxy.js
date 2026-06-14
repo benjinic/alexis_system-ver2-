@@ -5,6 +5,7 @@ const path = require('path');
 
 const DEFAULT_PROXY_URL = 'https://geminiproxy-iv4r7rb3ja-uc.a.run.app';
 const PROXY_URL = process.env.GEMINI_PROXY_URL || process.argv[2] || DEFAULT_PROXY_URL;
+const APP_CHECK_TOKEN = process.env.FIREBASE_APPCHECK_TOKEN || '';
 
 function readWebApiKey() {
   if (process.env.FIREBASE_WEB_API_KEY) {
@@ -79,6 +80,11 @@ function candidateText(body) {
 
 async function main() {
   const apiKey = readWebApiKey();
+  if (!APP_CHECK_TOKEN) {
+    throw new Error(
+      'Missing FIREBASE_APPCHECK_TOKEN. Generate a valid App Check token and retry.'
+    );
+  }
 
   const unauthorized = await postJson(PROXY_URL, { contents: [] });
   const unauthOk = unauthorized.response.status === 401;
@@ -92,7 +98,10 @@ async function main() {
         contents: [{ role: 'user', parts: [{ text: 'Answer with exactly: OK' }] }],
         generationConfig: { maxOutputTokens: 1024, temperature: 0 },
       },
-      { Authorization: `Bearer ${user.idToken}` }
+      {
+        Authorization: `Bearer ${user.idToken}`,
+        'X-Firebase-AppCheck': APP_CHECK_TOKEN,
+      }
     );
 
     const text = candidateText(authorized.json);
@@ -111,6 +120,7 @@ async function main() {
         candidateCount: authorized.json?.candidates?.length || 0,
         finishReason: authorized.json?.candidates?.[0]?.finishReason || null,
         hasText: Boolean(text),
+        appCheckHeaderSent: true,
         preview: text.slice(0, 40),
       },
     };

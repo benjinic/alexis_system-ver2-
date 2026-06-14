@@ -54,6 +54,7 @@ dependencies:
   universal_html: ^2.3.0 # [新增] 用於支援 Web 平台的檔案下載
   google_generative_ai: ^0.4.7
   http: ^1.6.0
+  firebase_app_check: ^0.4.4+2
 
 dev_dependencies:
   flutter_test:
