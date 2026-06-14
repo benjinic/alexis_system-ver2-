@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'providers/cart_provider.dart';
+import 'services/settings_service.dart';
+import 'l10n/app_localizations.dart';
 
 // 導入頁面與佈局
 import 'layouts/main_layout.dart';
@@ -20,6 +23,7 @@ import 'screens/customers_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await SettingsService().initialize();
   runApp(
     MultiProvider(
       providers: [ChangeNotifierProvider(create: (_) => CartProvider())],
@@ -28,85 +32,147 @@ void main() async {
   );
 }
 
-class AlexisSystemApp extends StatelessWidget {
+class AlexisSystemApp extends StatefulWidget {
   const AlexisSystemApp({super.key});
 
   @override
+  State<AlexisSystemApp> createState() => _AlexisSystemAppState();
+}
+
+class _AlexisSystemAppState extends State<AlexisSystemApp> {
+  final SettingsService _settingsService = SettingsService();
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Alexis Tailor System',
-      debugShowCheckedModeBanner: false,
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        _settingsService.accentColorNotifier,
+        _settingsService.textColorNotifier,
+        _settingsService.headingTextColorNotifier,
+        _settingsService.cardTitleColorNotifier,
+        _settingsService.sidebarTextColorNotifier,
+        _settingsService.localeNotifier,
+      ]),
+      builder: (context, child) {
+        final accentColor = _settingsService.accentColorNotifier.value;
+        final textColor = _settingsService.textColorNotifier.value;
+        final headingTextColor = _settingsService.headingTextColorNotifier.value;
+        final cardTitleColor = _settingsService.cardTitleColorNotifier.value;
+        final sidebarTextColor = _settingsService.sidebarTextColorNotifier.value;
+        final locale = _settingsService.localeNotifier.value;
+        return MaterialApp(
+          title: 'Alexis Tailor System',
+          debugShowCheckedModeBanner: false,
+          locale: locale,
+          localizationsDelegates: const [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [
+            Locale('en'),
+            Locale('zh', 'TW'),
+            Locale('zh', 'CN'),
+          ],
 
-      // === 設定深色主題 (Dark Theme) ===
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: Colors.black, // 背景純黑
-        // 自定義顏色方案 (已修正 deprecated 語法)
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF64B5F6), // 淺藍色
-          secondary: Color(0xFFFFD54F), // 琥珀色
-          surface: Color(0xFF1E1E2C), // 取代 background，設為深灰藍 (卡片底色)
-          onSurface: Colors.white, // 取代 onBackground，文字白色
-          // error: Colors.redAccent,
-        ),
-
-        // 卡片樣式
-        cardTheme: CardThemeData(
-          color: const Color(0xFF1E1E2C),
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            // 使用新版語法 withValues(alpha: ...)
-            side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          theme: ThemeData(
+            useMaterial3: true,
+            brightness: Brightness.dark,
+            scaffoldBackgroundColor: Colors.black,
+            fontFamily: 'NotoSansTC',
+            fontFamilyFallback: const ['NotoSansTC'],
+            colorScheme: ColorScheme.dark(
+              primary: accentColor,
+              secondary: const Color(0xFFFFD54F),
+              surface: const Color(0xFF1E1E2C),
+              onSurface: textColor,
+            ),
+            textTheme: ThemeData.dark().textTheme.apply(
+              bodyColor: textColor,
+              displayColor: headingTextColor,
+            ).merge(TextTheme(
+              titleLarge: TextStyle(color: cardTitleColor),
+              titleMedium: TextStyle(color: cardTitleColor),
+              titleSmall: TextStyle(color: cardTitleColor),
+              labelLarge: TextStyle(color: cardTitleColor),
+              labelMedium: TextStyle(color: cardTitleColor),
+              labelSmall: TextStyle(color: cardTitleColor),
+            )),
+            primaryTextTheme: ThemeData.dark().primaryTextTheme.apply(
+              bodyColor: textColor,
+              displayColor: headingTextColor,
+            ).merge(TextTheme(
+              titleLarge: TextStyle(color: cardTitleColor),
+              titleMedium: TextStyle(color: cardTitleColor),
+              titleSmall: TextStyle(color: cardTitleColor),
+              labelLarge: TextStyle(color: cardTitleColor),
+              labelMedium: TextStyle(color: cardTitleColor),
+              labelSmall: TextStyle(color: cardTitleColor),
+            )),
+            cardTheme: CardThemeData(
+              color: const Color(0xFF1E1E2C),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+              ),
+            ),
+            appBarTheme: AppBarTheme(
+              backgroundColor: Colors.black,
+              foregroundColor: textColor,
+              elevation: 0,
+            ),
+            listTileTheme: ListTileThemeData(
+              textColor: textColor,
+              iconColor: textColor,
+            ),
+            iconTheme: IconThemeData(color: textColor),
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: const Color(0xFF2C2C3E),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              labelStyle: TextStyle(color: cardTitleColor),
+              hintStyle: TextStyle(color: Colors.grey[500]),
+            ),
+            navigationRailTheme: NavigationRailThemeData(
+              selectedLabelTextStyle: TextStyle(color: sidebarTextColor, fontSize: 11),
+              unselectedLabelTextStyle: TextStyle(color: sidebarTextColor.withValues(alpha: 0.6), fontSize: 11),
+              selectedIconTheme: IconThemeData(color: sidebarTextColor),
+              unselectedIconTheme: IconThemeData(color: sidebarTextColor.withValues(alpha: 0.6)),
+            ),
           ),
-        ),
 
-        // AppBar 樣式
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
-
-        // 輸入框樣式
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF2C2C3E),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-          hintStyle: TextStyle(color: Colors.grey[500]),
-        ),
-      ),
-
-      // === 修正 1：Home 指向 AuthWrapper ===
-      home: const AuthWrapper(),
-
-      // === 修正 2：路由設定 (補上 child 與 currentRoute) ===
-      routes: {
-        '/dashboard': (context) => const MainLayout(
-          currentRoute: '/dashboard',
-          child: DashboardPage(),
-        ),
-        '/pos': (context) =>
-            const MainLayout(currentRoute: '/pos', child: POSPage()),
-        '/orders': (context) =>
-            const MainLayout(currentRoute: '/orders', child: OrdersPage()),
-        '/customers': (context) => const MainLayout(
-          currentRoute: '/customers',
-          child: CustomersScreen(),
-        ),
-        '/inventory': (context) =>
-            const MainLayout(currentRoute: '/inventory', child: FabricPage()),
-        '/workshop': (context) =>
-            const MainLayout(currentRoute: '/workshop', child: WorkshopPage()),
-        '/settings': (context) =>
-            const MainLayout(currentRoute: '/settings', child: SettingsPage()),
+          home: const AuthWrapper(),
+          routes: {
+            '/dashboard': (context) => const MainLayout(
+              currentRoute: '/dashboard',
+              child: DashboardPage(),
+            ),
+            '/pos': (context) =>
+                const MainLayout(currentRoute: '/pos', child: POSPage()),
+            '/orders': (context) =>
+                const MainLayout(currentRoute: '/orders', child: OrdersPage()),
+            '/customers': (context) => const MainLayout(
+              currentRoute: '/customers',
+              child: CustomersScreen(),
+            ),
+            '/inventory': (context) => const MainLayout(
+              currentRoute: '/inventory',
+              child: FabricPage(),
+            ),
+            '/workshop': (context) =>
+                MainLayout(currentRoute: '/workshop', child: WorkshopPage()),
+            '/settings': (context) =>
+                const MainLayout(currentRoute: '/settings', child: SettingsPage()),
+          },
+          onUnknownRoute: (settings) =>
+              MaterialPageRoute(builder: (_) => const NotFoundPage()),
+        );
       },
-      onUnknownRoute: (settings) =>
-          MaterialPageRoute(builder: (_) => const NotFoundPage()),
     );
   }
 }

@@ -1,9 +1,29 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/material.dart';
 
 class SettingsService {
   static final SettingsService _instance = SettingsService._internal();
   factory SettingsService() => _instance;
   SettingsService._internal();
+
+  final ValueNotifier<Color> accentColorNotifier = ValueNotifier<Color>(
+    const Color(0xFF64B5F6),
+  );
+  final ValueNotifier<Color> textColorNotifier = ValueNotifier<Color>(
+    Colors.white,
+  );
+  final ValueNotifier<Color> headingTextColorNotifier = ValueNotifier<Color>(
+    Colors.white,
+  );
+  final ValueNotifier<Color> cardTitleColorNotifier = ValueNotifier<Color>(
+    Colors.white,
+  );
+  final ValueNotifier<Color> sidebarTextColorNotifier = ValueNotifier<Color>(
+    Colors.white,
+  );
+  final ValueNotifier<Locale> localeNotifier = ValueNotifier<Locale>(
+    const Locale('en'),
+  );
 
   // 定義儲存的 Key (鍵值)
   static const String _keyShopName = 'shop_name';
@@ -11,6 +31,32 @@ class SettingsService {
   static const String _keyLanguage = 'language';
   static const String _keyUnit = 'unit';
   static const String _keyNotifications = 'notifications';
+  static const String _keyAccentColor = 'accent_color';
+  static const String _keyTextColor = 'text_color';
+  static const String _keyHeadingTextColor = 'heading_text_color';
+  static const String _keyCardTitleColor = 'card_title_color';
+  static const String _keySidebarTextColor = 'sidebar_text_color';
+
+  Future<void> initialize() async {
+    final prefs = await SharedPreferences.getInstance();
+    accentColorNotifier.value = Color(
+      prefs.getInt(_keyAccentColor) ?? 0xFF64B5F6,
+    );
+    textColorNotifier.value = Color(
+      prefs.getInt(_keyTextColor) ?? Colors.white.toARGB32(),
+    );
+    headingTextColorNotifier.value = Color(
+      prefs.getInt(_keyHeadingTextColor) ?? Colors.white.toARGB32(),
+    );
+    cardTitleColorNotifier.value = Color(
+      prefs.getInt(_keyCardTitleColor) ?? Colors.white.toARGB32(),
+    );
+    sidebarTextColorNotifier.value = Color(
+      prefs.getInt(_keySidebarTextColor) ?? Colors.white.toARGB32(),
+    );
+    final lang = prefs.getString(_keyLanguage) ?? 'English';
+    localeNotifier.value = _languageToLocale(lang);
+  }
 
   // 1. 讀取所有設定 (回傳一個 Map)
   Future<Map<String, dynamic>> loadSettings() async {
@@ -21,6 +67,11 @@ class SettingsService {
       'language': prefs.getString(_keyLanguage) ?? "English",
       'unit': prefs.getString(_keyUnit) ?? "Yards",
       'notifications': prefs.getBool(_keyNotifications) ?? true,
+      'accentColor': prefs.getInt(_keyAccentColor) ?? 0xFF64B5F6,
+      'textColor': prefs.getInt(_keyTextColor) ?? Colors.white.toARGB32(),
+      'headingTextColor': prefs.getInt(_keyHeadingTextColor) ?? Colors.white.toARGB32(),
+      'cardTitleColor': prefs.getInt(_keyCardTitleColor) ?? Colors.white.toARGB32(),
+      'sidebarTextColor': prefs.getInt(_keySidebarTextColor) ?? Colors.white.toARGB32(),
     };
   }
 
@@ -38,6 +89,18 @@ class SettingsService {
   Future<void> setLanguage(String value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyLanguage, value);
+    localeNotifier.value = _languageToLocale(value);
+  }
+
+  static Locale _languageToLocale(String language) {
+    switch (language) {
+      case '繁體中文':
+        return const Locale('zh', 'TW');
+      case '简体中文':
+        return const Locale('zh', 'CN');
+      default:
+        return const Locale('en');
+    }
   }
 
   Future<void> setUnit(String value) async {
@@ -49,10 +112,45 @@ class SettingsService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyNotifications, value);
   }
-  
+
+  Future<void> setAccentColor(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyAccentColor, value);
+    accentColorNotifier.value = Color(value);
+  }
+
+  Future<void> setTextColor(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyTextColor, value);
+    textColorNotifier.value = Color(value);
+  }
+
+  Future<void> setHeadingTextColor(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyHeadingTextColor, value);
+    headingTextColorNotifier.value = Color(value);
+  }
+
+  Future<void> setCardTitleColor(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyCardTitleColor, value);
+    cardTitleColorNotifier.value = Color(value);
+  }
+
+  Future<void> setSidebarTextColor(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keySidebarTextColor, value);
+    sidebarTextColorNotifier.value = Color(value);
+  }
+
   // 清除所有設定 (測試用)
   Future<void> clearAll() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
+    accentColorNotifier.value = const Color(0xFF64B5F6);
+    textColorNotifier.value = Colors.white;
+    headingTextColorNotifier.value = Colors.white;
+    cardTitleColorNotifier.value = Colors.white;
+    sidebarTextColorNotifier.value = Colors.white;
   }
 }
