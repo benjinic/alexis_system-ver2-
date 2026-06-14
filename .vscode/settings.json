@@ -1,5 +1,6 @@
 {
     "chat.todoListTool.writeOnly": true,
     "chat.todoListTool.descriptionField": true,
-    "chat.signInWithAlternateScopes": true
+    "chat.signInWithAlternateScopes": true,
+    "cmake.sourceDirectory": "${workspaceFolder}/windows/runner"
 }
