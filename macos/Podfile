@@ -1,5 +1,7 @@
 platform :osx, '10.15'
 
+inhibit_all_warnings!
+
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
@@ -26,6 +28,18 @@ require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelpe
 
 flutter_macos_podfile_setup
 
+pre_install do |installer|
+  # Fix gRPC-Core missing module.modulemap (CocoaPods 1.16.x bug)
+  installer.pod_targets.select { |p| p.name == 'gRPC-Core' }.each do |pod|
+    grpc_dir = File.join(installer.sandbox.root.to_s, 'gRPC-Core', 'include', 'grpc')
+    FileUtils.mkdir_p(grpc_dir)
+    modulemap = File.join(grpc_dir, 'module.modulemap')
+    unless File.exist?(modulemap)
+      File.write(modulemap, "framework module grpc {\n  umbrella header \"grpc.h\"\n  export *\n  module * { export * }\n}\n")
+    end
+  end
+end
+
 target 'Runner' do
   use_frameworks!
 
@@ -38,5 +52,19 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_macos_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['MACOSX_DEPLOYMENT_TARGET'] = '10.15'
+    end
+  end
+
+  # Fix BoringSSL-GRPC missing symlinks (openssl_grpc/ssl.h not found)
+  boringssl_target = installer.pods_project.targets.find { |t| t.name == 'BoringSSL-GRPC' }
+  if boringssl_target
+    boringssl_dir = File.join(installer.sandbox.pod_dir('BoringSSL-GRPC'), 'src', 'include')
+    grpc_link = File.join(boringssl_dir, 'openssl_grpc')
+    unless File.exist?(grpc_link)
+      boringssl_include = File.join(installer.sandbox.pod_dir('BoringSSL-GRPC'), 'src', 'include', 'openssl')
+      `mkdir -p #{boringssl_dir} && ln -sf #{boringssl_include} #{grpc_link}` if File.exist?(boringssl_include)
+    end
   end
 end
