@@ -82,15 +82,32 @@ service cloud.firestore {
       ]);
     }
 
-    function sensitiveOrderAggregatesUnchanged() {
-      return fieldUnchanged('itemSummary') &&
-        fieldUnchanged('fabricSummary') &&
-        fieldUnchanged('materialCost') &&
-        fieldUnchanged('laborCost') &&
-        fieldUnchanged('outsourcingCost') &&
-        fieldUnchanged('totalCost') &&
-        fieldUnchanged('totalProfit') &&
-        fieldUnchanged('isFabricOrdered');
+    function clientWritableOrderFields() {
+      return [
+        'uniqueId',
+        'customerId',
+        'customerName',
+        'subtotal',
+        'discount',
+        'total',
+        'deposit',
+        'balancePayment',
+        'balancePaymentMethod',
+        'balancePaidDate',
+        'balance',
+        'fixedCost',
+        'status',
+        'paymentMethod',
+        'createdAt',
+        'updatedAt',
+        'date',
+        'deliveryDate'
+      ];
+    }
+
+    function validOrderClientUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(clientWritableOrderFields());
     }
 
     function validOrder() {
@@ -322,7 +339,7 @@ service cloud.firestore {
     match /orders/{orderId} {
       allow read: if signedIn();
       allow create: if signedIn() && validOrder() && noSensitiveOrderAggregates();
-      allow update: if signedIn() && validOrder() && sensitiveOrderAggregatesUnchanged();
+      allow update: if signedIn() && validOrderClientUpdate();
       allow delete: if signedIn();
     }
 
