@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -39,13 +40,16 @@ Future<void> _initializeAppCheck() async {
     'FIREBASE_APPCHECK_RECAPTCHA_KEY',
   );
 
+  if (kIsWeb && recaptchaSiteKey.isEmpty) {
+    return;
+  }
+
   await FirebaseAppCheck.instance.activate(
-    providerWeb: recaptchaSiteKey.isEmpty
-        ? null
-        : ReCaptchaV3Provider(recaptchaSiteKey),
+    providerWeb: kIsWeb ? ReCaptchaEnterpriseProvider(recaptchaSiteKey) : null,
     providerAndroid: const AndroidPlayIntegrityProvider(),
     providerApple: const AppleAppAttestWithDeviceCheckFallbackProvider(),
   );
+  await FirebaseAppCheck.instance.setTokenAutoRefreshEnabled(true);
 }
 
 class AlexisSystemApp extends StatefulWidget {

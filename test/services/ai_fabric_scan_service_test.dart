@@ -107,6 +107,45 @@ void main() {
       expect(result.color, 'BLACK');
     });
 
+    test('continues without App Check token', () async {
+      late http.Request capturedRequest;
+      final service = AiFabricScanService(
+        idTokenProvider: () async => 'test-token',
+        appCheckTokenProvider: () async => null,
+        proxyUri: Uri.parse('https://example.test/gemini'),
+        client: MockClient((request) async {
+          capturedRequest = request;
+
+          return http.Response(
+            jsonEncode({
+              'candidates': [
+                {
+                  'content': {
+                    'parts': [
+                      {
+                        'text':
+                            '{"name":"TEST","category":"Cotton","color":"NAVY"}',
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      );
+
+      final result = await service.scanFabricLabel(
+        imageBytes: Uint8List.fromList([1, 2, 3]),
+        mimeType: 'image/png',
+      );
+
+      expect(capturedRequest.headers['Authorization'], 'Bearer test-token');
+      expect(capturedRequest.headers.containsKey('X-Firebase-AppCheck'), false);
+      expect(result.color, 'NAVY');
+    });
+
     test('throws when token provider returns empty token', () async {
       final service = AiFabricScanService(
         idTokenProvider: () async => '',

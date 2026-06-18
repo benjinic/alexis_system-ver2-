@@ -80,11 +80,6 @@ function candidateText(body) {
 
 async function main() {
   const apiKey = readWebApiKey();
-  if (!APP_CHECK_TOKEN) {
-    throw new Error(
-      'Missing FIREBASE_APPCHECK_TOKEN. Generate a valid App Check token and retry.'
-    );
-  }
 
   const unauthorized = await postJson(PROXY_URL, { contents: [] });
   const unauthOk = unauthorized.response.status === 401;
@@ -100,7 +95,7 @@ async function main() {
       },
       {
         Authorization: `Bearer ${user.idToken}`,
-        'X-Firebase-AppCheck': APP_CHECK_TOKEN,
+        ...(APP_CHECK_TOKEN ? { 'X-Firebase-AppCheck': APP_CHECK_TOKEN } : {}),
       }
     );
 
@@ -120,7 +115,7 @@ async function main() {
         candidateCount: authorized.json?.candidates?.length || 0,
         finishReason: authorized.json?.candidates?.[0]?.finishReason || null,
         hasText: Boolean(text),
-        appCheckHeaderSent: true,
+        appCheckHeaderSent: Boolean(APP_CHECK_TOKEN),
         preview: text.slice(0, 40),
       },
     };

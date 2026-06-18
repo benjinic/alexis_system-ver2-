@@ -55,17 +55,23 @@ class DatabaseService implements DatabaseServiceInterface {
     }
 
     final idToken = await user.getIdToken();
-    final appCheckToken = await FirebaseAppCheck.instance.getToken();
+    String? appCheckToken;
+    try {
+      appCheckToken = await FirebaseAppCheck.instance.getToken();
+    } catch (error) {
+      _log(
+        'App Check token unavailable; continuing with Firebase Auth only.',
+        error: error,
+      );
+    }
     if (idToken == null || idToken.isEmpty) {
       throw Exception('Unable to get Firebase ID token.');
-    }
-    if (appCheckToken == null || appCheckToken.isEmpty) {
-      throw Exception('Unable to get Firebase App Check token.');
     }
 
     return {
       'Authorization': 'Bearer $idToken',
-      'X-Firebase-AppCheck': appCheckToken,
+      if (appCheckToken != null && appCheckToken.isNotEmpty)
+        'X-Firebase-AppCheck': appCheckToken,
       'Content-Type': 'application/json',
     };
   }

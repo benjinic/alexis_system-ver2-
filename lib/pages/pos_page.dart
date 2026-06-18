@@ -617,6 +617,7 @@ class _POSPageState extends State<POSPage> {
       Order orderForPrinting = orderData;
       // Collect generated workshop orders for job ticket printing
       List<WorkshopOrder> generatedTickets = [];
+      final postSaveWarnings = <String>[];
 
       if (isEditMode) {
         await _dbService.updateOrder(orderData);
@@ -674,8 +675,13 @@ class _POSPageState extends State<POSPage> {
               isFabricOrdered: false,
             );
 
-            await _dbService.addWorkshopOrder(ticket);
-            generatedTickets.add(ticket);
+            try {
+              await _dbService.addWorkshopOrder(ticket);
+              generatedTickets.add(ticket);
+            } catch (error) {
+              debugPrint('Warning: failed to create workshop ticket: $error');
+              postSaveWarnings.add('Workshop ticket was not created.');
+            }
           }
         }
       }
@@ -852,16 +858,30 @@ class _POSPageState extends State<POSPage> {
           );
 
           if (markOrdered == true && mounted) {
-            await _dbService.updateOrderFabricRequiredItemsStatus(
-              orderId: orderId,
-              isFabricOrdered: true,
-            );
-            await _dbService.updateWorkshopOrdersFabricStatus(
-              orderId: orderId,
-              isFabricOrdered: true,
-            );
+            try {
+              await _dbService.updateOrderFabricRequiredItemsStatus(
+                orderId: orderId,
+                isFabricOrdered: true,
+              );
+              await _dbService.updateWorkshopOrdersFabricStatus(
+                orderId: orderId,
+                isFabricOrdered: true,
+              );
+            } catch (error) {
+              debugPrint('Warning: failed to mark fabric ordered: $error');
+              postSaveWarnings.add('Fabric ordered status was not updated.');
+            }
           }
         }
+      }
+
+      if (mounted && postSaveWarnings.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(postSaveWarnings.toSet().join(' ')),
+            backgroundColor: Colors.orange,
+          ),
+        );
       }
 
       // === Step 6: Cleanup and navigation ===

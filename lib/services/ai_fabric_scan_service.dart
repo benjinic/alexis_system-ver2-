@@ -67,16 +67,20 @@ class AiFabricScanService {
     if (idToken == null || idToken.isEmpty) {
       throw const AiFabricScanException('請先登入後再使用 AI 辨識。');
     }
-    final appCheckToken = await _appCheckTokenProvider();
-    if (appCheckToken == null || appCheckToken.isEmpty) {
-      throw const AiFabricScanException('無法取得 App Check 驗證，請重新整理後再試。');
+
+    String? appCheckToken;
+    try {
+      appCheckToken = await _appCheckTokenProvider();
+    } catch (_) {
+      appCheckToken = null;
     }
 
     final response = await _client.post(
       _proxyUri,
       headers: {
         'Authorization': 'Bearer $idToken',
-        'X-Firebase-AppCheck': appCheckToken,
+        if (appCheckToken != null && appCheckToken.isNotEmpty)
+          'X-Firebase-AppCheck': appCheckToken,
         'Content-Type': 'application/json',
       },
       body: jsonEncode({
@@ -155,10 +159,6 @@ class AiFabricScanService {
 
   static Future<String?> _firebaseAppCheckTokenProvider() async {
     final appCheckToken = await FirebaseAppCheck.instance.getToken();
-    if (appCheckToken == null || appCheckToken.isEmpty) {
-      throw const AiFabricScanException('無法取得 App Check 驗證，請重新整理後再試。');
-    }
-
     return appCheckToken;
   }
 

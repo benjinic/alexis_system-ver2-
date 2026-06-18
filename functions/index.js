@@ -54,12 +54,19 @@ async function verifyAppCheck(req, res) {
   }
 }
 
-async function verifyRequest(req, res, { limitPerMinute, rateLimitName }) {
+async function verifyRequest(req, res, {
+  limitPerMinute,
+  rateLimitName,
+  requireAppCheck = true,
+}) {
   const user = await verifyFirebaseUser(req, res);
   if (!user) return null;
 
-  const app = await verifyAppCheck(req, res);
-  if (!app) return null;
+  let app = null;
+  if (requireAppCheck) {
+    app = await verifyAppCheck(req, res);
+    if (!app) return null;
+  }
 
   const allowed = await consumeRateLimit({
     key: `${rateLimitName || 'request'}:${user.uid}`,
@@ -305,6 +312,7 @@ exports.allocateOrderId = onRequest(
     const verified = await verifyRequest(req, res, {
       limitPerMinute: ORDER_ID_RATE_LIMIT_PER_MINUTE,
       rateLimitName: 'allocateOrderId',
+      requireAppCheck: false,
     });
     if (!verified) return;
 
@@ -379,6 +387,7 @@ exports.geminiProxy = onRequest(
     const verified = await verifyRequest(req, res, {
       limitPerMinute: GEMINI_RATE_LIMIT_PER_MINUTE,
       rateLimitName: 'geminiProxy',
+      requireAppCheck: false,
     });
     if (!verified) return;
 
