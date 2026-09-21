@@ -16,6 +16,7 @@ import '../services/settings_service.dart';
 import '../services/cost_calculation_service.dart';
 import '../services/pdf_service.dart';
 import '../services/bespoke_import_service.dart';
+import '../components/bespoke_cart_mapping_dialog.dart';
 import '../providers/cart_provider.dart';
 import '../components/order_item_dialog.dart';
 
@@ -203,10 +204,16 @@ class _POSPageState extends State<POSPage> {
     try {
       final customers = await _dbService.getCustomersStream().first;
       final name = picked.clientName.trim().toLowerCase();
-      for (final c in customers) {
-        if (picked.phone.isNotEmpty && c.phone == picked.phone) {
-          match = c;
-          break;
+      // Bespoke 建單時由客人名單揀選嘅，直接用 customerId 對返同一個客人。
+      if (picked.customerId.isNotEmpty) {
+        match = customers.where((c) => c.id == picked.customerId).firstOrNull;
+      }
+      if (match == null) {
+        for (final c in customers) {
+          if (picked.phone.isNotEmpty && c.phone == picked.phone) {
+            match = c;
+            break;
+          }
         }
       }
       match ??= customers
@@ -234,11 +241,43 @@ class _POSPageState extends State<POSPage> {
           : '$existing\n${picked.toNotesText()}';
     });
 
+    // 每件衣服對應一個購物車項目：由職員揀 POS 服務、確認布料同單價。
+    var addedCount = 0;
+    if (picked.items.isNotEmpty) {
+      var inventory = <MaterialItem>[];
+      try {
+        inventory = await _dbService.getInventory();
+      } catch (_) {
+        // 讀唔到庫存就當冇對應，布料成本之後可喺購物車編輯。
+      }
+      if (!mounted) return;
+      final items = await showDialog<List<OrderItem>>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => BespokeCartMappingDialog(
+          order: picked,
+          services: _serviceByName.values.toList(),
+          inventory: inventory,
+        ),
+      );
+      if (items != null && items.isNotEmpty && mounted) {
+        final cart = context.read<CartProvider>();
+        for (final item in items) {
+          cart.addItem(item);
+        }
+        addedCount = items.length;
+      }
+    }
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          '已帶入「${picked.clientName}」的訂製資料（訂製總價 '
-          '$_currencySymbol${picked.totalPrice.toStringAsFixed(0)}），請加入服務項目後建立訂單',
+          addedCount > 0
+              ? '已帶入「${picked.clientName}」的訂製資料，並加入 $addedCount 項到購物車'
+                    '（訂製總價 $_currencySymbol${picked.totalPrice.toStringAsFixed(0)}），請核對後建立訂單'
+              : '已帶入「${picked.clientName}」的訂製資料（訂製總價 '
+                    '$_currencySymbol${picked.totalPrice.toStringAsFixed(0)}），請加入服務項目後建立訂單',
         ),
       ),
     );

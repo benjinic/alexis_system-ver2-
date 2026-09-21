@@ -25,6 +25,7 @@ class BespokeOrderSummary {
     required this.id,
     required this.clientName,
     required this.phone,
+    this.customerId = '',
     required this.date,
     required this.dueDate,
     required this.deposit,
@@ -35,6 +36,9 @@ class BespokeOrderSummary {
   final String id;
   final String clientName;
   final String phone;
+
+  /// Bespoke 建單時由客人名單揀選嘅 customers 文件 ID；手動輸入時為空。
+  final String customerId;
   final DateTime? date;
   final DateTime? dueDate;
   final double deposit;
@@ -48,6 +52,7 @@ class BespokeOrderSummary {
       id: doc.id,
       clientName: (m['clientName'] ?? '').toString(),
       phone: (m['phone'] ?? '').toString(),
+      customerId: (m['customerId'] ?? '').toString(),
       date: _toDate(m['date']),
       dueDate: _toDate(m['dueDate']),
       deposit: _toDouble(m['deposit']),
@@ -169,7 +174,8 @@ const Map<String, Map<String, String>> _designZh = {
     'sleeveStyle': '袖款',
     'pickStitch': '珠邊',
     'lapelStitch': '內襟珠線',
-    'cuffVent': '袖口褸',
+    'cuffVent': '袖口鈕',
+    'cuffButtonStyle': '袖口鈕式',
     'waistPocket': '腰袋',
     'backVent': '後叉',
   },
