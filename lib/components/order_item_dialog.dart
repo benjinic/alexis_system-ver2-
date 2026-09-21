@@ -16,7 +16,22 @@ class OrderItemDialog extends StatefulWidget {
   final OrderItem? existingItem;
   final int? index;
 
-  const OrderItemDialog({super.key, this.existingItem, this.index});
+  /// true = existingItem 只用嚟預填，儲存時當新增項目（標題顯示 Add Item）。
+  /// 例如由 Bespoke 匯入時預填服務、布料、用量同價錢。
+  final bool asNewItem;
+
+  /// 顯示喺視窗頂部嘅提示文字（例如「匯入自 Bespoke：外套 1/3」）。
+  final String? contextNote;
+
+  const OrderItemDialog({
+    super.key,
+    this.existingItem,
+    this.index,
+    this.asNewItem = false,
+    this.contextNote,
+  });
+
+  bool get _isEditing => existingItem != null && !asNewItem;
 
   @override
   State<OrderItemDialog> createState() => _OrderItemDialogState();
@@ -478,7 +493,7 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
     }).toList();
 
     return AlertDialog(
-      title: Text(widget.existingItem != null ? 'Edit Item' : 'Add Item'),
+      title: Text(widget._isEditing ? 'Edit Item' : 'Add Item'),
       content: _isLoadingFabrics
           ? const SizedBox(
               height: 200,
@@ -489,6 +504,24 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (widget.contextNote != null) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.secondaryContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        widget.contextNote!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSecondaryContainer,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   // === 1. Service List (no search) ===
                   StreamBuilder<List<ServiceItem>>(
                     stream: _dbService.getServicesStream(),
@@ -864,7 +897,7 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
         ),
         ElevatedButton(
           onPressed: _selectedService == null ? null : _handleSave,
-          child: Text(widget.existingItem != null ? 'Save' : 'Add'),
+          child: Text(widget._isEditing ? 'Save' : 'Add'),
         ),
       ],
     );

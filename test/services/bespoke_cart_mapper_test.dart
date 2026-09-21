@@ -61,13 +61,15 @@ void main() {
     });
   });
 
-  group('buildCartItem', () {
-    test('uses service price and computes fabric cost like the POS item dialog', () {
-      final item = buildCartItem(
+  group('buildPrefillItem', () {
+    final inventory = [fabric('a1', 'WHITE PIMA', 100)];
+
+    test('prefills service, price, default usage and inventory fabric', () {
+      final item = buildPrefillItem(
         id: '1',
-        service: svc('Suit', 5000, usage: 3),
-        fabric: fabric('a1', 'WHITE PIMA', 100),
-        fabricUsage: 3,
+        bespokeItem: {'type': 'jacket', 'fabricId': 'a1', 'fabric': 'WHITE PIMA'},
+        services: services,
+        inventory: inventory,
       );
       expect(item.service, 'Suit');
       expect(item.price, 5000);
@@ -75,41 +77,94 @@ void main() {
       expect(item.fabricId, 'a1');
       expect(item.fabricName, 'WHITE PIMA');
       expect(item.fabricUsed, 3);
-      expect(item.cost, 300);
-      expect(item.manualUnitPrice, isFalse);
       expect(item.sendToWorkshop, isTrue);
     });
 
-    test('marks a different unit price as manual', () {
-      final item = buildCartItem(
+    test('does not compute cost or mark manual price (the POS dialog owns pricing)', () {
+      final item = buildPrefillItem(
         id: '1',
-        service: svc('Shirt', 800),
-        fabricUsage: 2,
-        unitPrice: 950,
+        bespokeItem: {'type': 'jacket', 'fabricId': 'a1'},
+        services: services,
+        inventory: inventory,
       );
-      expect(item.price, 950);
-      expect(item.manualUnitPrice, isTrue);
-    });
-
-    test('without inventory fabric the cost is zero and fabric fields are empty', () {
-      final item = buildCartItem(id: '1', service: svc('Pants', 1200), fabricUsage: 1.5);
       expect(item.cost, 0);
-      expect(item.fabricId, isNull);
-      expect(item.fabricName, isNull);
       expect(item.manualUnitPrice, isFalse);
     });
 
-    test('negative usage or price is clamped to zero', () {
-      final item = buildCartItem(
+    test('falls back to fabric name when fabricId is missing', () {
+      final item = buildPrefillItem(
         id: '1',
-        service: svc('Pants', 1200),
-        fabric: fabric('a1', 'X', 100),
-        fabricUsage: -2,
-        unitPrice: -5,
+        bespokeItem: {'type': 'shirt', 'fabric': ' white pima '},
+        services: services,
+        inventory: inventory,
       );
-      expect(item.fabricUsed, 0);
-      expect(item.cost, 0);
+      expect(item.service, 'Shirt');
+      expect(item.fabricId, 'a1');
+    });
+
+    test('leaves the service empty when nothing matches, and skips fabric', () {
+      final item = buildPrefillItem(
+        id: '1',
+        bespokeItem: {'type': 'vest', 'fabricId': 'a1', 'fabric': 'WHITE PIMA'},
+        services: services,
+        inventory: inventory,
+      );
+      expect(item.service, '');
       expect(item.price, 0);
+      expect(item.fabricId, isNull);
+      expect(item.fabricUsed, 0);
+    });
+
+    test('a service with zero default fabric usage gets no fabric, like the POS dialog', () {
+      final item = buildPrefillItem(
+        id: '1',
+        bespokeItem: {'type': 'trousers', 'fabricId': 'a1'},
+        services: [svc('Pants', 1200)], // defaultFabricUsage = 0
+        inventory: inventory,
+      );
+      expect(item.service, 'Pants');
+      expect(item.fabricId, isNull);
+      expect(item.fabricUsed, 0);
+    });
+
+    test('unknown fabric leaves fabric fields empty but keeps the service', () {
+      final item = buildPrefillItem(
+        id: '1',
+        bespokeItem: {'type': 'jacket', 'fabricId': 'zzz', 'fabric': 'Unknown'},
+        services: services,
+        inventory: inventory,
+      );
+      expect(item.service, 'Suit');
+      expect(item.fabricId, isNull);
+      expect(item.fabricName, isNull);
+    });
+  });
+
+  group('describeBespokeItem', () {
+    final inventory = [fabric('a1', 'WHITE PIMA', 100)];
+
+    test('shows garment, position, matched fabric and swatch', () {
+      final text = describeBespokeItem(
+        {'type': 'jacket', 'fabricId': 'a1', 'fabric': 'WHITE PIMA', 'fabricSwatch': 'BN0033'},
+        index: 0,
+        total: 3,
+        inventory: inventory,
+      );
+      expect(text, contains('外套（1/3）'));
+      expect(text, contains('布料：WHITE PIMA（樣板：BN0033）'));
+      expect(text, contains('庫存已對應'));
+    });
+
+    test('warns when the fabric is not in inventory or not filled in', () {
+      expect(
+        describeBespokeItem({'type': 'shirt', 'fabric': 'Unknown'},
+            index: 1, total: 2, inventory: inventory),
+        contains('庫存找不到'),
+      );
+      expect(
+        describeBespokeItem({'type': 'vest'}, index: 0, total: 1, inventory: inventory),
+        contains('布料：未填寫'),
+      );
     });
   });
 }

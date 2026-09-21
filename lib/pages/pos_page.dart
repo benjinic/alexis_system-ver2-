@@ -16,7 +16,7 @@ import '../services/settings_service.dart';
 import '../services/cost_calculation_service.dart';
 import '../services/pdf_service.dart';
 import '../services/bespoke_import_service.dart';
-import '../components/bespoke_cart_mapping_dialog.dart';
+import '../services/bespoke_cart_mapper.dart';
 import '../providers/cart_provider.dart';
 import '../components/order_item_dialog.dart';
 
@@ -241,7 +241,9 @@ class _POSPageState extends State<POSPage> {
           : '$existing\n${picked.toNotesText()}';
     });
 
-    // 每件衣服對應一個購物車項目：由職員揀 POS 服務、確認布料同單價。
+    // 每件衣服各開一次 POS 原本嘅「新增項目」視窗，預填服務、布料、用量同價錢；
+    // 計價同成本全部由 OrderItemDialog 處理，職員照平時咁確認或修改。
+    // 按 Cancel 就略過該件（之後可喺購物車自己加）。
     var addedCount = 0;
     if (picked.items.isNotEmpty) {
       var inventory = <MaterialItem>[];
@@ -251,22 +253,34 @@ class _POSPageState extends State<POSPage> {
         // 讀唔到庫存就當冇對應，布料成本之後可喺購物車編輯。
       }
       if (!mounted) return;
-      final items = await showDialog<List<OrderItem>>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => BespokeCartMappingDialog(
-          order: picked,
-          services: _serviceByName.values.toList(),
-          inventory: inventory,
-        ),
-      );
-      if (items != null && items.isNotEmpty && mounted) {
-        final cart = context.read<CartProvider>();
-        for (final item in items) {
-          cart.addItem(item);
-        }
-        addedCount = items.length;
+      final cart = context.read<CartProvider>();
+      final cartBefore = cart.items.length;
+      final services = _serviceByName.values.toList();
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      for (var i = 0; i < picked.items.length; i++) {
+        if (!mounted) return;
+        final raw = picked.items[i];
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => OrderItemDialog(
+            existingItem: buildPrefillItem(
+              id: '${stamp + i}',
+              bespokeItem: raw,
+              services: services,
+              inventory: inventory,
+            ),
+            asNewItem: true,
+            contextNote: describeBespokeItem(
+              raw,
+              index: i,
+              total: picked.items.length,
+              inventory: inventory,
+            ),
+          ),
+        );
       }
+      addedCount = cart.items.length - cartBefore;
     }
     if (!mounted) return;
 
