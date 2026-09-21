@@ -9,15 +9,30 @@ import 'package:http/http.dart' as http;
 import '../models/order.dart';
 import '../models/material_item.dart';
 import '../models/workshop_order.dart';
+import '../models/contact_log.dart';
 import '../models/customer.dart';
 import '../models/service_item.dart';
 import 'database_service_interface.dart';
 import 'fabric_order_status_sync.dart';
 
+class StaffAccountException implements Exception {
+  const StaffAccountException({this.code, required this.message});
+
+  final String? code;
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class DatabaseService implements DatabaseServiceInterface {
   static const String _logName = 'DatabaseService';
   static final Uri _allocateOrderIdUri = Uri.parse(
     'https://us-central1-alexis-tailor-system-2025.cloudfunctions.net/allocateOrderId',
+  );
+
+  static final Uri _createStaffAccountUri = Uri.parse(
+    'https://us-central1-alexis-tailor-system-2025.cloudfunctions.net/createStaffAccount',
   );
 
   void _log(String message, {Object? error, StackTrace? stackTrace}) {
@@ -76,6 +91,33 @@ class DatabaseService implements DatabaseServiceInterface {
     };
   }
 
+  // 建立員工帳號（Auth 使用者 + staff 名單）。由後端函式處理，client 不能自行註冊。
+  // 失敗時拋出 StaffAccountException，code 對應後端回傳（例如 email-already-in-use）。
+  Future<void> createStaffAccount({
+    required String email,
+    required String password,
+  }) async {
+    final response = await http.post(
+      _createStaffAccountUri,
+      headers: await _functionAuthHeaders(),
+      body: jsonEncode({'email': email, 'password': password}),
+    );
+
+    if (response.statusCode == 200) return;
+
+    String? code;
+    String? message;
+    try {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      code = body['code']?.toString();
+      message = body['error']?.toString();
+    } catch (_) {}
+    throw StaffAccountException(
+      code: code,
+      message: message ?? 'HTTP ${response.statusCode}',
+    );
+  }
+
   Future<String> _allocateOrderId() async {
     final response = await http.post(
       _allocateOrderIdUri,
@@ -104,7 +146,6 @@ class DatabaseService implements DatabaseServiceInterface {
     orderData.remove('itemSummary');
     orderData.remove('fabricSummary');
     orderData.remove('materialCost');
-    orderData.remove('laborCost');
     orderData.remove('outsourcingCost');
     orderData.remove('totalCost');
     orderData.remove('totalProfit');
@@ -120,16 +161,16 @@ class DatabaseService implements DatabaseServiceInterface {
     int? limit,
     bool isIncompleteOnly = false,
   }) {
-    Query query = _ordersRef.orderBy('createdAt', descending: true);
+    Query query;
 
     if (isIncompleteOnly) {
-      // 只查詢 'pending' 或 'confirmed' 的訂單 (未完成)
-      // 注意：這可能需要在 Firebase Console 建立複合索引 (status + createdAt)
-      query = query.where('status', whereIn: ['pending', 'confirmed']);
-    }
-
-    if (limit != null) {
-      query = query.limit(limit);
+      // whereIn without orderBy avoids requiring a composite index
+      query = _ordersRef.where('status', whereIn: ['pending', 'confirmed']);
+    } else {
+      query = _ordersRef.orderBy('createdAt', descending: true);
+      if (limit != null) {
+        query = query.limit(limit);
+      }
     }
 
     return query.snapshots().map((snapshot) {
@@ -444,13 +485,28 @@ class DatabaseService implements DatabaseServiceInterface {
   Future<List<Order>> getOrdersByCustomerId(String customerId) async {
     final snapshot = await _ordersRef
         .where('customerId', isEqualTo: customerId)
-        .orderBy('createdAt', descending: true)
         .get();
-    return snapshot.docs
+    final orders = snapshot.docs
         .map(
           (doc) => Order.fromMap(doc.id, doc.data() as Map<dynamic, dynamic>),
         )
         .toList();
+    orders.sort((a, b) => (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
+    return orders;
+  }
+
+  Stream<List<Order>> getOrdersByCustomerIdStream(String customerId) {
+    return _ordersRef
+        .where('customerId', isEqualTo: customerId)
+        .snapshots()
+        .map((snapshot) {
+          final orders = snapshot.docs
+              .map((doc) =>
+                  Order.fromMap(doc.id, doc.data() as Map<dynamic, dynamic>))
+              .toList();
+          orders.sort((a, b) => (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
+          return orders;
+        });
   }
 
   // === 2. Inventory (庫存/布料) ===
@@ -474,7 +530,7 @@ class DatabaseService implements DatabaseServiceInterface {
 
   // 更新布料
   Future<void> updateMaterial(MaterialItem item) async {
-    await _inventoryRef.doc(item.id).update(item.toJson());
+    await _inventoryRef.doc(item.id).set(item.toJson());
   }
 
   // 刪除布料
@@ -643,10 +699,58 @@ class DatabaseService implements DatabaseServiceInterface {
     await _customersRef.doc(customer.id).update(customer.toJson());
   }
 
+  Future<void> incrementCustomerStats({
+    required String customerId,
+    required double totalAmount,
+  }) async {
+    if (customerId.isEmpty) return;
+    await _customersRef.doc(customerId).update({
+      'totalSpent': FieldValue.increment(totalAmount),
+      'orders': FieldValue.increment(1),
+    });
+  }
+
   // === 4b. Customer Stream Aliases (新 POS 系統相容層) ===
   /// Alias for getCustomersStream - used by new POS implementation
   Stream<List<Customer>> customersStream() {
     return getCustomersStream();
+  }
+
+  // === 4c. Contact Logs ===
+
+  Stream<List<ContactLog>> getContactLogsStream(String customerId) {
+    return _customersRef
+        .doc(customerId)
+        .collection('contact_logs')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((doc) => ContactLog.fromFirestore(doc.id, doc.data()))
+            .toList());
+  }
+
+  Future<void> addContactLog(String customerId, ContactLog log) async {
+    await _customersRef
+        .doc(customerId)
+        .collection('contact_logs')
+        .add(log.toFirestore());
+    if (log.followUpDate != null) {
+      await _customersRef.doc(customerId).update({
+        'nextFollowUp': log.followUpDate,
+      });
+    }
+  }
+
+  Future<void> deleteContactLog(String customerId, String logId) async {
+    await _customersRef
+        .doc(customerId)
+        .collection('contact_logs')
+        .doc(logId)
+        .delete();
+  }
+
+  Future<void> clearFollowUp(String customerId) async {
+    await _customersRef.doc(customerId).update({'nextFollowUp': null});
   }
 
   // === 5. Settings (系統設定) ===

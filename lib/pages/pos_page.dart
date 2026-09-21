@@ -12,14 +12,30 @@ import '../models/customer.dart';
 import '../models/material_item.dart';
 import '../models/service_item.dart';
 import '../services/database_service.dart';
+import '../services/settings_service.dart';
 import '../services/cost_calculation_service.dart';
 import '../services/pdf_service.dart';
+import '../services/bespoke_import_service.dart';
 import '../providers/cart_provider.dart';
 import '../components/order_item_dialog.dart';
 
 class POSPage extends StatefulWidget {
   final Order? orderForEdit;
-  const POSPage({super.key, this.orderForEdit});
+
+  // === 訂製訂單匯入用（可選，唔影響原有 POS 落單流程） ===
+  final String? prefillCustomerName;
+  final DateTime? prefillDeliveryDate;
+  final String? prefillNotes;
+  final void Function(String orderId)? onOrderSaved;
+
+  const POSPage({
+    super.key,
+    this.orderForEdit,
+    this.prefillCustomerName,
+    this.prefillDeliveryDate,
+    this.prefillNotes,
+    this.onOrderSaved,
+  });
 
   @override
   State<POSPage> createState() => _POSPageState();
@@ -38,15 +54,18 @@ class _POSPageState extends State<POSPage> {
   final TextEditingController _customerNameController = TextEditingController();
   final TextEditingController _discountController = TextEditingController();
   final TextEditingController _depositController = TextEditingController();
-  final TextEditingController _balancePaymentController =
-      TextEditingController();
+  List<BalancePayment> _payments = [];
   final TextEditingController _fixedCostController = TextEditingController();
+  final TextEditingController _laborCostController = TextEditingController();
+  final TextEditingController _notesController = TextEditingController();
+  DateTime? _deliveryDate;
 
   String? _selectedCustomerId;
+  Customer? _selectedCustomer;
+  String? _importedBespokeId; // 由 Bespoke 匯入時，儲存成功後要回寫嘅訂製訂單 ID
 
   bool _isLoading = false;
   String _selectedPaymentMethod = 'Cash';
-  String _selectedBalancePaymentMethod = 'Cash';
 
   final List<String> _paymentMethods = [
     'Cash',
@@ -61,6 +80,7 @@ class _POSPageState extends State<POSPage> {
   late Stream<List<Customer>> _customersStream;
   Stream<int>? _nextOrderIdStream;
   Map<String, ServiceItem> _serviceByName = {};
+  String _currencySymbol = 'HK\$';
 
   // 已完成/取消的訂單保留原始財務數值；confirmed 訂單仍可編輯並重算合計。
   bool get _isHistorical {
@@ -69,9 +89,22 @@ class _POSPageState extends State<POSPage> {
     return status == 'completed' || status == 'cancelled';
   }
 
+  static String _codeToSymbol(String code) => switch (code) {
+    'USD' => 'US\$',
+    'HKD' => 'HK\$',
+    'TWD' => 'NT\$',
+    'EUR' => '€',
+    'GBP' => '£',
+    _ => code,
+  };
+
   @override
   void initState() {
     super.initState();
+    SettingsService().loadSettings().then((s) {
+      final sym = _codeToSymbol(s['currency'] as String? ?? 'HKD');
+      if (mounted) setState(() => _currencySymbol = sym);
+    });
     _timeStream = Stream.periodic(
       const Duration(seconds: 1),
       (_) => DateTime.now(),
@@ -114,8 +147,9 @@ class _POSPageState extends State<POSPage> {
     _customerNameController.dispose();
     _discountController.dispose();
     _depositController.dispose();
-    _balancePaymentController.dispose();
     _fixedCostController.dispose();
+    _laborCostController.dispose();
+    _notesController.dispose();
     super.dispose();
   }
 
@@ -135,23 +169,79 @@ class _POSPageState extends State<POSPage> {
           ? ''
           : order.deposit.toStringAsFixed(0);
 
-      _balancePaymentController.text = order.balancePayment == 0
-          ? ''
-          : order.balancePayment.toStringAsFixed(0);
+      _payments = List.of(order.payments);
       _fixedCostController.text = order.fixedCost == 0
           ? ''
           : order.fixedCost.toStringAsFixed(0);
-      if (order.balancePaymentMethod != null &&
-          _paymentMethods.contains(order.balancePaymentMethod)) {
-        _selectedBalancePaymentMethod = order.balancePaymentMethod!;
-      }
+      _laborCostController.text = order.laborCost == 0
+          ? ''
+          : order.laborCost.toStringAsFixed(0);
 
       if (_paymentMethods.contains(order.paymentMethod)) {
         _selectedPaymentMethod = order.paymentMethod;
       } else {
         _selectedPaymentMethod = 'Other';
       }
+
+      _deliveryDate = order.deliveryDate;
+      _notesController.text = order.notes;
     });
+  }
+
+  // === 從 Bespoke 匯入 ===
+  // 只預填客人資料、訂金、交貨日同備注；服務項目同價錢由職員自己加，
+  // 儲存時單號由 allocateOrderId 分配（即 POS 最新單號）。
+  Future<void> _importFromBespoke() async {
+    final picked = await showDialog<BespokeOrderSummary>(
+      context: context,
+      builder: (_) => _BespokeOrderPickerDialog(service: BespokeImportService()),
+    );
+    if (picked == null || !mounted) return;
+
+    // 盡量對應返 POS 現有客人：先比電話，再比名稱。
+    Customer? match;
+    try {
+      final customers = await _dbService.getCustomersStream().first;
+      final name = picked.clientName.trim().toLowerCase();
+      for (final c in customers) {
+        if (picked.phone.isNotEmpty && c.phone == picked.phone) {
+          match = c;
+          break;
+        }
+      }
+      match ??= customers
+          .where((c) => c.name.trim().toLowerCase() == name)
+          .firstOrNull;
+    } catch (_) {
+      // 讀唔到客人列表就當冇對應，之後照舊建立新客人。
+    }
+    if (!mounted) return;
+
+    setState(() {
+      _importedBespokeId = picked.id;
+      _selectedCustomerId = match?.id;
+      _selectedCustomer = match;
+      _customerNameController.text = match?.name ?? picked.clientName;
+      _depositController.text = picked.deposit > 0
+          ? (picked.deposit == picked.deposit.roundToDouble()
+                ? picked.deposit.toStringAsFixed(0)
+                : '${picked.deposit}')
+          : '';
+      if (picked.dueDate != null) _deliveryDate = picked.dueDate;
+      final existing = _notesController.text.trim();
+      _notesController.text = existing.isEmpty
+          ? picked.toNotesText()
+          : '$existing\n${picked.toNotesText()}';
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '已帶入「${picked.clientName}」的訂製資料（訂製總價 '
+          '$_currencySymbol${picked.totalPrice.toStringAsFixed(0)}），請加入服務項目後建立訂單',
+        ),
+      ),
+    );
   }
 
   void _showCustomerSelectSheet(BuildContext context) {
@@ -190,18 +280,15 @@ class _POSPageState extends State<POSPage> {
                       ),
                       const SizedBox(height: 16),
                       TextField(
-                        style: const TextStyle(color: Colors.black),
                         decoration: InputDecoration(
                           hintText: AppLocalizations.of(
                             context,
                           ).searchCustomerHint,
-                          hintStyle: TextStyle(color: Colors.grey[600]),
                           prefixIcon: const IconText(Icons.search),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
                           filled: true,
-                          fillColor: Colors.grey[100],
                         ),
                         onChanged: (val) => setModalState(
                           () => searchQuery = val.toLowerCase(),
@@ -237,16 +324,16 @@ class _POSPageState extends State<POSPage> {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    const IconText(
+                                    IconText(
                                       Icons.person_off,
                                       size: 48,
-                                      color: Colors.grey,
+                                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                                     ),
                                     const SizedBox(height: 12),
                                     Text(
                                       'No customer found for "$searchQuery"',
-                                      style: const TextStyle(
-                                        color: Colors.grey,
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                                       ),
                                     ),
                                     const SizedBox(height: 12),
@@ -281,16 +368,16 @@ class _POSPageState extends State<POSPage> {
                                 return ListTile(
                                   leading: CircleAvatar(
                                     backgroundColor: isSelected
-                                        ? Theme.of(context).primaryColor
-                                        : Colors.grey[200],
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Theme.of(context).colorScheme.surfaceContainerHighest,
                                     child: Text(
                                       customer.name.isNotEmpty
                                           ? customer.name[0].toUpperCase()
                                           : '?',
                                       style: TextStyle(
                                         color: isSelected
-                                            ? Colors.white
-                                            : Colors.black,
+                                            ? Theme.of(context).colorScheme.onPrimary
+                                            : Theme.of(context).colorScheme.onSurfaceVariant,
                                       ),
                                     ),
                                   ),
@@ -308,12 +395,13 @@ class _POSPageState extends State<POSPage> {
                                   trailing: isSelected
                                       ? IconText(
                                           Icons.check_circle,
-                                          color: Theme.of(context).primaryColor,
+                                          color: Theme.of(context).colorScheme.primary,
                                         )
                                       : null,
                                   onTap: () {
                                     setState(() {
                                       _selectedCustomerId = customer.id;
+                                      _selectedCustomer = customer;
                                       _customerNameController.text =
                                           customer.name;
                                     });
@@ -361,7 +449,6 @@ class _POSPageState extends State<POSPage> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     filled: true,
-                    fillColor: Colors.grey[50],
                   ),
                   inputFormatters: [
                     TextInputFormatter.withFunction(
@@ -386,7 +473,6 @@ class _POSPageState extends State<POSPage> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     filled: true,
-                    fillColor: Colors.grey[50],
                   ),
                   keyboardType: TextInputType.phone,
                 ),
@@ -400,7 +486,6 @@ class _POSPageState extends State<POSPage> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     filled: true,
-                    fillColor: Colors.grey[50],
                   ),
                   keyboardType: TextInputType.emailAddress,
                   validator: (value) {
@@ -440,6 +525,7 @@ class _POSPageState extends State<POSPage> {
                   if (!mounted) return;
                   setState(() {
                     _selectedCustomerId = id;
+                    _selectedCustomer = newCustomer.copyWith(id: id);
                     _customerNameController.text = nameController.text.trim();
                   });
                   messenger.showSnackBar(
@@ -459,6 +545,69 @@ class _POSPageState extends State<POSPage> {
               }
             },
             child: Text(AppLocalizations.of(ctx).addCustomerAction),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCustomerMeasurementsDialog(Customer customer) {
+    final l10n = AppLocalizations.of(context);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const IconText(Icons.straighten, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${customer.name} — ${l10n.bodyMeasurements}',
+                style: const TextStyle(fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+        content: customer.measurements.isEmpty
+            ? Text(l10n.noMeasurements)
+            : Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: customer.measurements.entries.map((entry) {
+                  return Container(
+                    width: 110,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Theme.of(ctx).colorScheme.outlineVariant),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          entry.key,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(ctx).colorScheme.onSurface.withValues(alpha: 0.6),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          entry.value,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(l10n.closeButton),
           ),
         ],
       ),
@@ -497,7 +646,7 @@ class _POSPageState extends State<POSPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(AppLocalizations.of(context).pleaseAddItemsMsg),
-          backgroundColor: Colors.red,
+          backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
       return;
@@ -526,9 +675,8 @@ class _POSPageState extends State<POSPage> {
       double materialCost = _isHistorical
           ? widget.orderForEdit!.materialCost
           : cart.totalCost;
-      double laborCost = widget.orderForEdit != null
-          ? widget.orderForEdit!.laborCost
-          : 0.0;
+      double laborCost = double.tryParse(_laborCostController.text) ??
+          (_isHistorical ? widget.orderForEdit!.laborCost : 0.0);
       double outsourcingCost = _isHistorical
           ? widget.orderForEdit!.outsourcingCost
           : CostCalculationService.calculateOutsourcingCostFromItems(
@@ -544,6 +692,7 @@ class _POSPageState extends State<POSPage> {
               materialCost: materialCost,
               outsourcingCost: outsourcingCost,
               fixedCost: fixedCost,
+              laborCost: laborCost,
             );
       double discount =
           double.tryParse(_discountController.text) ??
@@ -554,7 +703,7 @@ class _POSPageState extends State<POSPage> {
 
       double deposit = double.tryParse(_depositController.text) ?? 0.0;
       double balancePayment =
-          double.tryParse(_balancePaymentController.text) ?? 0.0;
+          _payments.fold(0.0, (sum, p) => sum + p.amount);
       double balance = total - (deposit + balancePayment);
       if (balance < 0) balance = 0;
 
@@ -594,13 +743,12 @@ class _POSPageState extends State<POSPage> {
         total: total,
         deposit: deposit,
         balancePayment: balancePayment,
-        balancePaymentMethod: balancePayment > 0
-            ? _selectedBalancePaymentMethod
-            : null,
-        balancePaidDate: balancePayment > 0
-            ? DateTime.now()
-            : widget.orderForEdit?.balancePaidDate,
+        balancePaymentMethod:
+            _payments.isNotEmpty ? _payments.last.method : null,
+        balancePaidDate:
+            _payments.isNotEmpty ? _payments.last.paidAt : null,
         balance: balance,
+        payments: _payments,
         materialCost: materialCost,
         laborCost: laborCost,
         outsourcingCost: outsourcingCost,
@@ -611,6 +759,8 @@ class _POSPageState extends State<POSPage> {
         paymentMethod: _selectedPaymentMethod,
         createdAt: isEditMode ? widget.orderForEdit!.createdAt : DateTime.now(),
         updatedAt: DateTime.now(),
+        deliveryDate: _deliveryDate,
+        notes: _notesController.text.trim(),
       );
 
       // Order object for printing (will be updated with ID after save)
@@ -625,8 +775,22 @@ class _POSPageState extends State<POSPage> {
         orderId = await _dbService.addOrder(orderData);
         orderForPrinting = orderData.copyWith(id: orderId);
 
+        // 由 Bespoke 匯入：訂單已建立，回寫關聯。失敗只提醒，唔影響訂單本身。
+        final bespokeId = _importedBespokeId;
+        if (bespokeId != null) {
+          try {
+            await BespokeImportService().markImported(
+              bespokeId,
+              posOrderId: orderId,
+            );
+          } catch (error) {
+            debugPrint('Warning: failed to mark bespoke order imported: $error');
+            postSaveWarnings.add('Bespoke 訂單未能標記為已匯入：$error');
+          }
+        }
+
         for (var item in syncedItems) {
-          if (item.fabricUsed > 0 || item.service == 'Alterations') {
+          if (item.sendToWorkshop) {
             // Look up service duration from settings
             int productionDays = 7; // Default fallback
             try {
@@ -692,7 +856,6 @@ class _POSPageState extends State<POSPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(AppLocalizations.of(context).orderProcessedSuccess),
-            backgroundColor: Colors.green,
           ),
         );
       }
@@ -737,7 +900,7 @@ class _POSPageState extends State<POSPage> {
           builder: (ctx) => AlertDialog(
             title: Text(AppLocalizations.of(ctx).printJobTicketsTitle),
             content: Text(
-              'Created ${generatedTickets.length} workshop orders.\nPrint job tickets for the factory?',
+              AppLocalizations.of(ctx).printJobTicketsBody(generatedTickets.length),
             ),
             actions: [
               TextButton(
@@ -778,11 +941,11 @@ class _POSPageState extends State<POSPage> {
             context: context,
             barrierDismissible: false,
             builder: (ctx) => AlertDialog(
-              title: const Row(
+              title: Row(
                 children: [
-                  Icon(Icons.local_shipping_outlined, color: Colors.orange),
-                  SizedBox(width: 8),
-                  Text('訂布提醒', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Icon(Icons.local_shipping_outlined, color: Theme.of(ctx).colorScheme.tertiary),
+                  const SizedBox(width: 8),
+                  Text(AppLocalizations.of(ctx).fabricReminderTitle, style: const TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
               content: SizedBox(
@@ -791,9 +954,9 @@ class _POSPageState extends State<POSPage> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      '以下布料需要向供應商訂購：',
-                      style: TextStyle(fontWeight: FontWeight.w600),
+                    Text(
+                      AppLocalizations.of(ctx).fabricReminderSubtitle,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 12),
                     ...fabricItems.map(
@@ -802,10 +965,10 @@ class _POSPageState extends State<POSPage> {
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.texture,
                               size: 16,
-                              color: Colors.grey,
+                              color: Theme.of(ctx).colorScheme.onSurface.withValues(alpha: 0.5),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
@@ -826,7 +989,7 @@ class _POSPageState extends State<POSPage> {
                                     '${item.fabricUsed > 0 ? '  ·  ${item.fabricUsed.toStringAsFixed(1)} m' : ''}',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.grey[600],
+                                      color: Theme.of(ctx).colorScheme.onSurface.withValues(alpha: 0.6),
                                     ),
                                   ),
                                 ],
@@ -842,14 +1005,14 @@ class _POSPageState extends State<POSPage> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('稍後處理'),
+                  child: Text(AppLocalizations.of(ctx).laterButton),
                 ),
                 ElevatedButton.icon(
                   icon: const Icon(Icons.check, size: 16),
-                  label: const Text('已訂布料'),
+                  label: Text(AppLocalizations.of(ctx).markFabricOrdered),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
+                    backgroundColor: Theme.of(ctx).colorScheme.tertiary,
+                    foregroundColor: Theme.of(ctx).colorScheme.onTertiary,
                   ),
                   onPressed: () => Navigator.pop(ctx, true),
                 ),
@@ -879,7 +1042,7 @@ class _POSPageState extends State<POSPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(postSaveWarnings.toSet().join(' ')),
-            backgroundColor: Colors.orange,
+            backgroundColor: Theme.of(context).colorScheme.tertiary,
           ),
         );
       }
@@ -896,10 +1059,18 @@ class _POSPageState extends State<POSPage> {
             _customerNameController.clear();
             _discountController.clear();
             _depositController.clear();
-            _balancePaymentController.clear();
+            _payments = [];
             _fixedCostController.clear();
             _selectedCustomerId = null;
+            _selectedCustomer = null;
+            _laborCostController.clear();
             _selectedPaymentMethod = 'Cash';
+            // 匯入嘅備注同交貨日屬於上一張單，唔好帶落下一張。
+            if (_importedBespokeId != null) {
+              _notesController.clear();
+              _deliveryDate = null;
+              _importedBespokeId = null;
+            }
           });
         }
       }
@@ -907,7 +1078,7 @@ class _POSPageState extends State<POSPage> {
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Theme.of(context).colorScheme.error),
         );
       }
     }
@@ -921,12 +1092,12 @@ class _POSPageState extends State<POSPage> {
     if (widget.orderForEdit != null) {
       titleWidget = Text(
         'Edit Order #${widget.orderForEdit!.id}',
-        style: const TextStyle(
+        style: TextStyle(
           fontWeight: FontWeight.bold,
-          color: Colors.brown,
+          color: Theme.of(context).colorScheme.onSecondaryContainer,
         ),
       );
-      appBarColor = Colors.orange[100];
+      appBarColor = Theme.of(context).colorScheme.secondaryContainer;
     } else {
       titleWidget = StreamBuilder<int>(
         stream: _nextOrderIdStream,
@@ -946,6 +1117,17 @@ class _POSPageState extends State<POSPage> {
         title: titleWidget,
         elevation: 0,
         backgroundColor: appBarColor,
+        actions: [
+          if (widget.orderForEdit == null)
+            TextButton.icon(
+              icon: const IconText(Icons.checkroom_outlined),
+              label: Text(
+                _importedBespokeId == null ? '從 Bespoke 匯入' : '已帶入 Bespoke 訂單',
+              ),
+              onPressed: _isLoading ? null : _importFromBespoke,
+            ),
+          const SizedBox(width: 8),
+        ],
       ),
       // 修正響應式佈局：使用 LayoutBuilder
       body: _isLoading
@@ -1062,13 +1244,13 @@ class _POSPageState extends State<POSPage> {
                         IconText(
                           Icons.shopping_cart_outlined,
                           size: 64,
-                          color: Colors.grey[300],
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
                         ),
                         const SizedBox(height: 16),
                         Text(
                           AppLocalizations.of(context).cartEmpty,
                           style: TextStyle(
-                            color: Colors.grey[500],
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                             fontSize: 18,
                           ),
                         ),
@@ -1133,14 +1315,14 @@ class _POSPageState extends State<POSPage> {
                                   vertical: 2,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Colors.blue[50],
+                                  color: Theme.of(context).colorScheme.primaryContainer,
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
                                   'x${item.quantity}',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.blue,
+                                    color: Theme.of(context).colorScheme.primary,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
@@ -1159,20 +1341,20 @@ class _POSPageState extends State<POSPage> {
                               children: [
                                 if (item.fabricName != null) ...[
                                   Text(
-                                    'Mat: \$${item.cost.toStringAsFixed(1)}',
+                                    'Mat: $_currencySymbol${item.cost.toStringAsFixed(1)}',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.grey[600],
+                                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                                     ),
                                   ),
                                   const SizedBox(width: 10),
                                 ],
                                 if (itemOutsourcingCost > 0)
                                   Text(
-                                    'Out: \$${itemOutsourcingCost.toStringAsFixed(1)}',
+                                    'Out: $_currencySymbol${itemOutsourcingCost.toStringAsFixed(1)}',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.orange[700],
+                                      color: Theme.of(context).colorScheme.tertiary,
                                     ),
                                   ),
                               ],
@@ -1182,8 +1364,33 @@ class _POSPageState extends State<POSPage> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            if (widget.orderForEdit == null) ...[
+                              IconButton(
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                icon: IconText(
+                                  item.sendToWorkshop
+                                      ? Icons.engineering
+                                      : Icons.engineering_outlined,
+                                  color: item.sendToWorkshop
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                                  size: 20,
+                                ),
+                                tooltip: item.sendToWorkshop
+                                    ? 'Remove from workshop'
+                                    : 'Send to workshop',
+                                onPressed: () => cart.updateItem(
+                                  index,
+                                  item.copyWith(
+                                    sendToWorkshop: !item.sendToWorkshop,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                            ],
                             Text(
-                              '\$${(unitPrice * item.quantity).toStringAsFixed(0)}',
+                              '$_currencySymbol${(unitPrice * item.quantity).toStringAsFixed(0)}',
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
@@ -1194,9 +1401,9 @@ class _POSPageState extends State<POSPage> {
                             if (!_isHistorical ||
                                 widget.orderForEdit != null) ...[
                               IconButton(
-                                icon: const IconText(
+                                icon: IconText(
                                   Icons.edit,
-                                  color: Colors.blue,
+                                  color: Theme.of(context).colorScheme.primary,
                                 ),
                                 tooltip: AppLocalizations.of(
                                   context,
@@ -1207,18 +1414,18 @@ class _POSPageState extends State<POSPage> {
                                 ),
                               ),
                               IconButton(
-                                icon: const IconText(
+                                icon: IconText(
                                   Icons.delete,
-                                  color: Colors.red,
+                                  color: Theme.of(context).colorScheme.error,
                                 ),
                                 onPressed: () => cart.removeItem(index),
                               ),
                             ] else ...[
-                              const Tooltip(
+                              Tooltip(
                                 message: 'Historical Order (Locked)',
                                 child: Icon(
                                   Icons.lock_outline,
-                                  color: Colors.grey,
+                                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                                   size: 20,
                                 ),
                               ),
@@ -1247,6 +1454,212 @@ class _POSPageState extends State<POSPage> {
     );
   }
 
+  Widget _buildPaymentsSection() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Balance Payments',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              if (!_isHistorical)
+                TextButton.icon(
+                  onPressed: _showAddPaymentDialog,
+                  icon: const IconText(Icons.add, size: 16),
+                  label: const Text('Add'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.primary,
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                ),
+            ],
+          ),
+          if (_payments.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'No payments recorded',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 13,
+                ),
+              ),
+            )
+          else
+            ..._payments.asMap().entries.map((entry) {
+              final i = entry.key;
+              final p = entry.value;
+              return Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  children: [
+                    IconText(
+                      Icons.receipt_long,
+                      size: 15,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      DateFormat('MM/dd/yy').format(p.paidAt),
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .secondaryContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        p.method,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSecondaryContainer,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '$_currencySymbol${p.amount.toStringAsFixed(0)}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    if (!_isHistorical) ...[
+                      const SizedBox(width: 4),
+                      InkWell(
+                        onTap: () => setState(() => _payments.removeAt(i)),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: IconText(
+                            Icons.close,
+                            size: 15,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  void _showAddPaymentDialog() {
+    final amountController = TextEditingController();
+    String method = _paymentMethods.first;
+    DateTime paidAt = DateTime.now();
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Add Balance Payment'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: amountController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Amount',
+                  prefixIcon: IconText(Icons.payments_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(
+                      RegExp(r'^\d*\.?\d{0,2}')),
+                ],
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                initialValue: method,
+                decoration: const InputDecoration(
+                  labelText: 'Payment Method',
+                  border: OutlineInputBorder(),
+                ),
+                items: _paymentMethods
+                    .map((m) => DropdownMenuItem(value: m, child: Text(m)))
+                    .toList(),
+                onChanged: (v) => setDialogState(() => method = v!),
+              ),
+              const SizedBox(height: 16),
+              InkWell(
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: ctx,
+                    initialDate: paidAt,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now().add(const Duration(days: 1)),
+                  );
+                  if (picked != null) {
+                    setDialogState(() => paidAt = picked);
+                  }
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Payment Date',
+                    prefixIcon: IconText(Icons.calendar_today_outlined),
+                    border: OutlineInputBorder(),
+                  ),
+                  child: Text(DateFormat('yyyy-MM-dd').format(paidAt)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final amount =
+                    double.tryParse(amountController.text) ?? 0.0;
+                if (amount <= 0) return;
+                setState(() {
+                  _payments.add(BalancePayment(
+                    amount: amount,
+                    method: method,
+                    paidAt: paidAt,
+                  ));
+                });
+                Navigator.pop(ctx);
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildSummaryCard() {
     final cart = context.watch<CartProvider>();
 
@@ -1269,12 +1682,16 @@ class _POSPageState extends State<POSPage> {
     double fixedCost =
         double.tryParse(_fixedCostController.text) ??
         (_isHistorical ? widget.orderForEdit!.fixedCost : 0.0);
+    double laborCostDisplay =
+        double.tryParse(_laborCostController.text) ??
+        (_isHistorical ? widget.orderForEdit!.laborCost : 0.0);
     double totalCost = _isHistorical
         ? widget.orderForEdit!.totalCost
         : CostCalculationService.calculateTotalCost(
             materialCost: materialCost,
             outsourcingCost: outsourcingCost,
             fixedCost: fixedCost,
+            laborCost: laborCostDisplay,
           );
     double discount =
         double.tryParse(_discountController.text) ??
@@ -1288,7 +1705,7 @@ class _POSPageState extends State<POSPage> {
 
     double deposit = double.tryParse(_depositController.text) ?? 0.0;
     double balancePayment =
-        double.tryParse(_balancePaymentController.text) ?? 0.0;
+        _payments.fold(0.0, (sum, p) => sum + p.amount);
     double balance = total - (deposit + balancePayment);
 
     String btnText = widget.orderForEdit != null
@@ -1332,21 +1749,113 @@ class _POSPageState extends State<POSPage> {
                 if (!_isHistorical)
                   Container(
                     decoration: BoxDecoration(
-                      color: Theme.of(
-                        context,
-                      ).primaryColor.withValues(alpha: 0.1),
+                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: IconButton(
                       icon: IconText(
                         Icons.person_add,
-                        color: Theme.of(context).primaryColor,
+                        color: Theme.of(context).colorScheme.primary,
                       ),
                       tooltip: AppLocalizations.of(context).addNewCustomer,
                       onPressed: () => _showAddCustomerDialog(context),
                     ),
                   ),
               ],
+            ),
+
+            if (_selectedCustomer != null &&
+                _selectedCustomer!.measurements.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () =>
+                      _showCustomerMeasurementsDialog(_selectedCustomer!),
+                  icon: const IconText(Icons.straighten, size: 16),
+                  label: Text(AppLocalizations.of(context).bodyMeasurements),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 16),
+            InkWell(
+              onTap: _isHistorical
+                  ? null
+                  : () async {
+                      final cart = context.read<CartProvider>();
+                      int maxDays = 7;
+                      for (final item in cart.items) {
+                        final svc = _serviceByName[item.service];
+                        if (svc != null && svc.durationDays > maxDays) {
+                          maxDays = svc.durationDays;
+                        }
+                      }
+                      final initial = _deliveryDate ??
+                          DateTime.now().add(Duration(days: maxDays));
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: initial,
+                        firstDate: DateTime.now().subtract(
+                          const Duration(days: 1),
+                        ),
+                        lastDate: DateTime.now().add(
+                          const Duration(days: 730),
+                        ),
+                      );
+                      if (picked != null) {
+                        setState(() => _deliveryDate = picked);
+                      }
+                    },
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: AppLocalizations.of(context).deliveryDateLabel,
+                  prefixIcon: const IconText(Icons.event_outlined),
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                  suffixIcon: _deliveryDate != null && !_isHistorical
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 16),
+                          onPressed: () =>
+                              setState(() => _deliveryDate = null),
+                        )
+                      : null,
+                ),
+                child: Text(
+                  _deliveryDate != null
+                      ? DateFormat('yyyy-MM-dd').format(_deliveryDate!)
+                      : _isHistorical
+                      ? '—'
+                      : AppLocalizations.of(context).tapToSet,
+                  style: TextStyle(
+                    color: _deliveryDate != null
+                        ? null
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+            TextField(
+              controller: _notesController,
+              readOnly: _isHistorical,
+              decoration: InputDecoration(
+                labelText: AppLocalizations.of(context).notesLabel,
+                hintText: AppLocalizations.of(context).notesHint,
+                prefixIcon: const IconText(Icons.notes_outlined),
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+              maxLines: 2,
+              minLines: 1,
             ),
 
             const SizedBox(height: 24),
@@ -1409,45 +1918,75 @@ class _POSPageState extends State<POSPage> {
             _buildRow(
               AppLocalizations.of(context).materialCost,
               materialCost,
-              color: Colors.grey[700],
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
             ),
             const SizedBox(height: 8),
             _buildRow(
               'Outsourcing Cost (Auto)',
               outsourcingCost,
-              color: Colors.grey[700],
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
             ),
             const SizedBox(height: 8),
-            TextField(
-              controller: _fixedCostController,
-              readOnly: _isHistorical,
-              decoration: const InputDecoration(
-                labelText: 'Fixed Cost (Allocated)',
-                prefixIcon: IconText(Icons.apartment_outlined),
-                isDense: true,
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _fixedCostController,
+                    readOnly: _isHistorical,
+                    decoration: InputDecoration(
+                      labelText: AppLocalizations.of(context).fixedCost,
+                      prefixIcon: const IconText(Icons.apartment_outlined),
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'^\d*\.?\d{0,2}'),
+                      ),
+                    ],
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _laborCostController,
+                    readOnly: _isHistorical,
+                    decoration: InputDecoration(
+                      labelText: AppLocalizations.of(context).laborCost,
+                      prefixIcon: const IconText(Icons.build_outlined),
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'^\d*\.?\d{0,2}'),
+                      ),
+                    ],
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
               ],
-              onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 8),
             _buildRow(
               AppLocalizations.of(context).totalCost,
               totalCost,
               isBold: true,
-              color: Colors.red[400],
+              color: Theme.of(context).colorScheme.error,
             ),
             const SizedBox(height: 8),
             _buildRow(
               AppLocalizations.of(context).estimatedProfit,
               totalProfit,
               isBold: true,
-              color: totalProfit >= 0 ? Colors.green[700] : Colors.red[700],
+              color: totalProfit >= 0 ? Theme.of(context).colorScheme.tertiary : Theme.of(context).colorScheme.error,
             ),
             const SizedBox(height: 16),
             const Divider(),
@@ -1461,10 +2000,10 @@ class _POSPageState extends State<POSPage> {
                 prefixIcon: const IconText(Icons.payments_outlined),
                 border: const OutlineInputBorder(),
                 fillColor: _isHistorical
-                    ? Colors.grey[200]
+                    ? Theme.of(context).colorScheme.surfaceContainerHighest
                     : isEditMode
-                    ? Colors.grey[100]
-                    : const Color(0xFFF0F9EB),
+                    ? Theme.of(context).colorScheme.surfaceContainerLow
+                    : Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4),
                 filled: true,
               ),
               keyboardType: const TextInputType.numberWithOptions(
@@ -1478,94 +2017,62 @@ class _POSPageState extends State<POSPage> {
 
             if (isEditMode) ...[
               const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[200]!),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Balance Payment (Pay Now)',
-                      style: TextStyle(
-                        color: Colors.blue,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _balancePaymentController,
-                      decoration: InputDecoration(
-                        hintText: AppLocalizations.of(context).enterAmountHint,
-                        prefixIcon: const IconText(
-                          Icons.add_card,
-                          color: Colors.blue,
-                        ),
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                        fillColor: Colors.white,
-                        filled: true,
-                      ),
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'^\d*\.?\d{0,2}'),
-                        ),
-                      ],
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      AppLocalizations.of(context).balanceMethod,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    DropdownButtonFormField<String>(
-                      initialValue: _selectedBalancePaymentMethod,
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                        fillColor: Colors.white,
-                        filled: true,
-                      ),
-                      items: _paymentMethods
-                          .map(
-                            (m) => DropdownMenuItem(value: m, child: Text(m)),
-                          )
-                          .toList(),
-                      onChanged: (v) =>
-                          setState(() => _selectedBalancePaymentMethod = v!),
-                    ),
-                  ],
-                ),
-              ),
+              _buildPaymentsSection(),
             ],
 
             const SizedBox(height: 16),
 
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: balance > 0 ? Colors.orange[50] : Colors.green[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: balance > 0 ? Colors.orange[200]! : Colors.green[200]!,
+            Builder(builder: (context) {
+              final overpaid = balance < 0 ? -balance : 0.0;
+              final displayBalance = balance.clamp(0.0, double.infinity);
+              final isPaid = displayBalance <= 0;
+              return Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isPaid
+                      ? Theme.of(context).colorScheme.secondaryContainer
+                      : Theme.of(context).colorScheme.tertiaryContainer,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isPaid
+                        ? Theme.of(context).colorScheme.secondary.withValues(alpha: 0.4)
+                        : Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.4),
+                  ),
                 ),
-              ),
-              child: _buildRow(
-                AppLocalizations.of(context).outstandingBalance,
-                balance,
-                isBold: true,
-                color: balance > 0 ? Colors.deepOrange : Colors.green[700],
-              ),
-            ),
+                child: Column(
+                  children: [
+                    _buildRow(
+                      AppLocalizations.of(context).outstandingBalance,
+                      displayBalance,
+                      isBold: true,
+                      color: isPaid
+                          ? Theme.of(context).colorScheme.onSecondaryContainer
+                          : Theme.of(context).colorScheme.onTertiaryContainer,
+                    ),
+                    if (overpaid > 0) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          IconText(
+                            Icons.info_outline,
+                            size: 13,
+                            color: Theme.of(context).colorScheme.onSecondaryContainer,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Overpaid: $_currencySymbol${overpaid.toStringAsFixed(0)}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context).colorScheme.onSecondaryContainer,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            }),
 
             const SizedBox(height: 24),
             SizedBox(
@@ -1575,9 +2082,11 @@ class _POSPageState extends State<POSPage> {
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 20),
                   backgroundColor: isEditMode
-                      ? Colors.orange
-                      : Theme.of(context).primaryColor,
-                  foregroundColor: Colors.white,
+                      ? Theme.of(context).colorScheme.secondary
+                      : Theme.of(context).colorScheme.primary,
+                  foregroundColor: isEditMode
+                      ? Theme.of(context).colorScheme.onSecondary
+                      : Theme.of(context).colorScheme.onPrimary,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ), // 按鈕也圓角一點
@@ -1616,7 +2125,7 @@ class _POSPageState extends State<POSPage> {
           ),
         ),
         Text(
-          '\$${value.toStringAsFixed(0)}',
+          '$_currencySymbol${value.toStringAsFixed(0)}',
           style: TextStyle(
             fontSize: fontSize,
             fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
@@ -1789,7 +2298,7 @@ class _FabricGalleryDialogState extends State<_FabricGalleryDialog> {
                 const SizedBox(height: 4),
                 Text(
                   previews[_currentPage].item.service,
-                  style: TextStyle(color: Colors.grey[700]),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
                 ),
                 const SizedBox(height: 12),
                 SizedBox(
@@ -1808,7 +2317,7 @@ class _FabricGalleryDialogState extends State<_FabricGalleryDialog> {
                       return ClipRRect(
                         borderRadius: BorderRadius.circular(12),
                         child: DecoratedBox(
-                          decoration: BoxDecoration(color: Colors.grey[100]),
+                          decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerLow),
                           child: GestureDetector(
                             onDoubleTap: () {
                               _transformationController.value =
@@ -1849,7 +2358,7 @@ class _FabricGalleryDialogState extends State<_FabricGalleryDialog> {
                   children: [
                     Text(
                       'Swipe left/right to view more',
-                      style: TextStyle(color: Colors.grey[700]),
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
                     ),
                     Text('${_currentPage + 1} / ${previews.length}'),
                   ],
@@ -1863,6 +2372,95 @@ class _FabricGalleryDialogState extends State<_FabricGalleryDialog> {
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: Text(AppLocalizations.of(context).closeButton),
+        ),
+      ],
+    );
+  }
+}
+
+/// 揀選未匯入嘅 Bespoke 訂製訂單。
+class _BespokeOrderPickerDialog extends StatefulWidget {
+  const _BespokeOrderPickerDialog({required this.service});
+  final BespokeImportService service;
+
+  @override
+  State<_BespokeOrderPickerDialog> createState() =>
+      _BespokeOrderPickerDialogState();
+}
+
+class _BespokeOrderPickerDialogState extends State<_BespokeOrderPickerDialog> {
+  late final Future<List<BespokeOrderSummary>> _future = widget.service
+      .fetchPending();
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = DateFormat('yyyy-MM-dd');
+    return AlertDialog(
+      title: const Text('從 Bespoke 匯入'),
+      content: SizedBox(
+        width: 440,
+        height: 420,
+        child: Column(
+          children: [
+            TextField(
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: '搜尋客人名稱',
+                isDense: true,
+                prefixIcon: IconText(Icons.search),
+              ),
+              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: FutureBuilder<List<BespokeOrderSummary>>(
+                future: _future,
+                builder: (context, snap) {
+                  if (snap.hasError) {
+                    return Center(child: Text('載入失敗：${snap.error}'));
+                  }
+                  if (!snap.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final list = snap.data!
+                      .where(
+                        (o) =>
+                            _query.isEmpty ||
+                            o.clientName.toLowerCase().contains(_query),
+                      )
+                      .toList();
+                  if (list.isEmpty) {
+                    return const Center(child: Text('沒有待匯入的訂製訂單'));
+                  }
+                  return ListView.builder(
+                    itemCount: list.length,
+                    itemBuilder: (_, i) {
+                      final o = list[i];
+                      final info = [
+                        if (o.garmentLabels.isNotEmpty) o.garmentLabels,
+                        if (o.date != null) '落單 ${fmt.format(o.date!)}',
+                        if (o.dueDate != null) '交貨 ${fmt.format(o.dueDate!)}',
+                      ].join('　');
+                      return ListTile(
+                        dense: true,
+                        title: Text(o.clientName),
+                        subtitle: Text(info),
+                        trailing: Text(o.totalPrice.toStringAsFixed(0)),
+                        onTap: () => Navigator.pop(context, o),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
         ),
       ],
     );

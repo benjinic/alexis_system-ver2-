@@ -113,6 +113,7 @@ class CostCalculationService {
       materialCost: order.materialCost,
       outsourcingCost: outsourcingCost,
       fixedCost: order.fixedCost,
+      laborCost: order.laborCost,
     );
     final balance = calculateBalance(
       total: total,
@@ -125,7 +126,7 @@ class CostCalculationService {
       subtotal: subtotal,
       total: total,
       balance: balance,
-      laborCost: 0,
+      laborCost: order.laborCost,
       outsourcingCost: outsourcingCost,
       totalCost: totalCost,
       totalProfit: total - totalCost,
@@ -176,8 +177,9 @@ class CostCalculationService {
     required double materialCost,
     required double outsourcingCost,
     required double fixedCost,
+    double laborCost = 0.0,
   }) {
-    return materialCost + outsourcingCost + fixedCost;
+    return materialCost + outsourcingCost + fixedCost + laborCost;
   }
 
   // 新邏輯：使用服務明確設定的 outsourcingCost，不再反推 (/2.5)

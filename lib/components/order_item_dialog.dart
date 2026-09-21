@@ -159,6 +159,7 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
       cost: estimatedMaterialCost,
       isFabricOrdered: widget.existingItem?.isFabricOrdered ?? false,
       manualUnitPrice: manualUnitPrice,
+      sendToWorkshop: widget.existingItem?.sendToWorkshop ?? true,
     );
 
     // 透過 Provider 更新

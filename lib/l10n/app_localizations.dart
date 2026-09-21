@@ -99,6 +99,7 @@ class AppLocalizations {
   String get materialCost => _get('materialCost');
   String get outsourcingCost => _get('outsourcingCost');
   String get fixedCost => _get('fixedCost');
+  String get laborCost => _get('laborCost');
   String get totalCost => _get('totalCost');
   String get netProfit => _get('netProfit');
   String get subtotal => _get('subtotal');
@@ -131,7 +132,15 @@ class AppLocalizations {
   String get loadMoreHistory => _get('loadMoreHistory');
   String get markFabricOrdered => _get('markFabricOrdered');
   String loadMoreShowing(int count) => '${_get('loadMoreShowing')} $count+';
+  String allOrdersLoaded(int n) =>
+      _get('allOrdersLoaded').replaceFirst('{n}', '$n');
   String get unexpectedError => _get('unexpectedError');
+  String get confirmOrderButton => _get('confirmOrderButton');
+  String get markAsCompleteButton => _get('markAsCompleteButton');
+  String get confirmOrderMsg => _get('confirmOrderMsg');
+  String get markCompleteMsg => _get('markCompleteMsg');
+  String get deliveryDateLabel => _get('deliveryDateLabel');
+  String get balancePaymentsLabel => _get('balancePaymentsLabel');
 
   // ── Workshop ─────────────────────────────────────────────────────────────────
   String get workshopTitle => _get('workshopTitle');
@@ -156,6 +165,7 @@ class AppLocalizations {
   String get changesSaved => _get('changesSaved');
   String get searchWorkshopHint => _get('searchWorkshopHint');
   String get dueDateLabel => _get('dueDateLabel');
+  String fabricSyncError(String error) => '${_get('fabricSyncError')}$error';
 
   // ── Fabric ───────────────────────────────────────────────────────────────────
   String get fabricTitle => _get('fabricTitle');
@@ -220,6 +230,11 @@ class AppLocalizations {
   String get pleaseAddItemsMsg => _get('pleaseAddItemsMsg');
   String get enterAmountHint => _get('enterAmountHint');
   String get noFabricText => _get('noFabricText');
+  String get fabricReminderTitle => _get('fabricReminderTitle');
+  String get fabricReminderSubtitle => _get('fabricReminderSubtitle');
+  String get laterButton => _get('laterButton');
+  String printJobTicketsBody(int count) =>
+      _get('printJobTicketsBody').replaceFirst('{n}', '$count');
 
   // ── Customers ────────────────────────────────────────────────────────────────
   String get customersTitle => _get('customersTitle');
@@ -231,6 +246,11 @@ class AppLocalizations {
   String get twoYearSpent => _get('twoYearSpent');
   String get ordersLabel => _get('ordersLabel');
   String get noCustomersFound => _get('noCustomersFound');
+  String get noCustomerData => _get('noCustomerData');
+  String get exportPreparing => _get('exportPreparing');
+  String get exportSuccess => _get('exportSuccess');
+  String exportFailedMsg(Object error) => '${_get('exportFailed')}: $error';
+  String get requiredField => _get('requiredField');
 
   // ── Settings ─────────────────────────────────────────────────────────────────
   String get settingsTitle => _get('settingsTitle');
@@ -302,6 +322,28 @@ class AppLocalizations {
   String get noMeasurements => _get('noMeasurements');
   String get noOrdersFound => _get('noOrdersFound');
   String get profileUpdated => _get('profileUpdated');
+  String get contactLog => _get('contactLog');
+  String get addContactLog => _get('addContactLog');
+  String get contactType => _get('contactType');
+  String get contactTypeCall => _get('contactTypeCall');
+  String get contactTypeFitting => _get('contactTypeFitting');
+  String get contactTypeMessage => _get('contactTypeMessage');
+  String get contactTypeNote => _get('contactTypeNote');
+  String get noContactLogs => _get('noContactLogs');
+  String get contactLogAdded => _get('contactLogAdded');
+  String get editOrderInPOS => _get('editOrderInPOS');
+  String get tapToSet => _get('tapToSet');
+  String get timelineTitle => _get('timelineTitle');
+  String get filterAll => _get('filterAll');
+  String get filterContact => _get('filterContact');
+  String get filterFitting => _get('filterFitting');
+  String get filterOrder => _get('filterOrder');
+  String get tierNew => _get('tierNew');
+  String get tierRegular => _get('tierRegular');
+  String get tierVip => _get('tierVip');
+  String get followUpDate => _get('followUpDate');
+  String get followUpDue => _get('followUpDue');
+  String get markDone => _get('markDone');
 
   // ── Translation Tables ────────────────────────────────────────────────────────
   static const Map<String, Map<String, String>> _translations = {
@@ -379,6 +421,7 @@ class AppLocalizations {
       'materialCost': 'Material Cost',
       'outsourcingCost': 'Outsourcing Cost',
       'fixedCost': 'Fixed Cost',
+      'laborCost': 'Labor Cost',
       'totalCost': 'Total Cost',
       'netProfit': 'Net Profit',
       'subtotal': 'Subtotal',
@@ -392,6 +435,7 @@ class AppLocalizations {
       'noFabricRequired': 'No Fabric Required',
       'fabricMarkedOrdered': 'Fabric marked as ordered',
       'fabricMarkedNotOrdered': 'Fabric marked as not ordered',
+      'fabricSyncError': 'Fabric sync failed: ',
       'receiptButton': 'Receipt',
       'photosButton': 'Photos',
       'deleteOrder': 'Delete Order',
@@ -411,7 +455,14 @@ class AppLocalizations {
       'loadMoreHistory': 'Load More History',
       'markFabricOrdered': 'Mark Fabric Ordered',
       'loadMoreShowing': 'Load More (Showing',
+      'allOrdersLoaded': 'All {n} orders loaded',
       'unexpectedError': 'An unexpected error occurred.',
+      'confirmOrderButton': 'Confirm Order',
+      'markAsCompleteButton': 'Mark as Complete',
+      'confirmOrderMsg': 'Mark this order as confirmed?',
+      'markCompleteMsg': 'Mark this order as completed?\nThis cannot be undone.',
+      'deliveryDateLabel': 'Delivery Date',
+      'balancePaymentsLabel': 'Balance Payments',
       // Workshop
       'workshopTitle': 'Workshop Board',
       'statusMeasuring': 'Measuring',
@@ -497,6 +548,10 @@ class AppLocalizations {
       'pleaseAddItemsMsg': 'Please add items and select a customer',
       'enterAmountHint': 'Enter amount',
       'noFabricText': 'No fabric required',
+      'fabricReminderTitle': 'Fabric Order Reminder',
+      'fabricReminderSubtitle': 'The following fabrics need to be ordered from suppliers:',
+      'laterButton': 'Later',
+      'printJobTicketsBody': 'Created {n} workshop orders.\nPrint job tickets for the factory?',
       // Customers
       'customersTitle': 'Customers',
       'exportButton': 'Export',
@@ -507,6 +562,11 @@ class AppLocalizations {
       'twoYearSpent': '2-Year Spent:',
       'ordersLabel': 'Orders',
       'noCustomersFound': 'No customers found.',
+      'noCustomerData': 'No customer data found.',
+      'exportPreparing': 'Preparing data for export...',
+      'exportSuccess': '✅ Export Successful!',
+      'exportFailed': '❌ Export failed',
+      'requiredField': 'Required',
       // Settings
       'settingsTitle': 'Settings',
       'shopInformation': 'Shop Information',
@@ -575,6 +635,29 @@ class AppLocalizations {
       'noMeasurements': 'No measurements yet.',
       'noOrdersFound': 'No orders found.',
       'profileUpdated': 'Profile updated successfully',
+      // Contact Log
+      'contactLog': 'Contact Log',
+      'addContactLog': 'Add Log',
+      'contactType': 'Type',
+      'contactTypeCall': 'Call',
+      'contactTypeFitting': 'Fitting',
+      'contactTypeMessage': 'Message',
+      'contactTypeNote': 'Note',
+      'noContactLogs': 'No contact logs yet.',
+      'contactLogAdded': 'Log added.',
+      'editOrderInPOS': 'Edit Order',
+      'tapToSet': 'Tap to set...',
+      'timelineTitle': 'Timeline',
+      'filterAll': 'All',
+      'filterContact': 'Contact',
+      'filterFitting': 'Fitting',
+      'filterOrder': 'Order',
+      'tierNew': 'New',
+      'tierRegular': 'Regular',
+      'tierVip': 'VIP',
+      'followUpDate': 'Follow-up Date',
+      'followUpDue': 'Follow-up due',
+      'markDone': 'Done',
     },
 
     'zh_TW': {
@@ -651,6 +734,7 @@ class AppLocalizations {
       'materialCost': '材料成本',
       'outsourcingCost': '外包成本',
       'fixedCost': '固定成本',
+      'laborCost': '人工成本',
       'totalCost': '總成本',
       'netProfit': '淨利潤',
       'subtotal': '小計',
@@ -664,6 +748,7 @@ class AppLocalizations {
       'noFabricRequired': '無需布料',
       'fabricMarkedOrdered': '布料已標記為已訂購',
       'fabricMarkedNotOrdered': '布料已標記為未訂購',
+      'fabricSyncError': '布料狀態同步失敗: ',
       'receiptButton': '收據',
       'photosButton': '照片',
       'deleteOrder': '刪除訂單',
@@ -683,7 +768,14 @@ class AppLocalizations {
       'loadMoreHistory': '載入更多歷史',
       'markFabricOrdered': '標記布料已訂購',
       'loadMoreShowing': '載入更多（顯示中',
+      'allOrdersLoaded': '已載入全部 {n} 筆',
       'unexpectedError': '發生未預期的錯誤。',
+      'confirmOrderButton': '確認訂單',
+      'markAsCompleteButton': '標記為完成',
+      'confirmOrderMsg': '確認此訂單？',
+      'markCompleteMsg': '將此訂單標記為完成？\n此操作無法復原。',
+      'deliveryDateLabel': '交貨日期',
+      'balancePaymentsLabel': '餘款記錄',
       // Workshop
       'workshopTitle': '工坊看板',
       'statusMeasuring': '量度',
@@ -769,6 +861,10 @@ class AppLocalizations {
       'pleaseAddItemsMsg': '請新增項目並選擇客戶',
       'enterAmountHint': '輸入金額',
       'noFabricText': '無需布料',
+      'fabricReminderTitle': '訂布提醒',
+      'fabricReminderSubtitle': '以下布料需要向供應商訂購：',
+      'laterButton': '稍後',
+      'printJobTicketsBody': '已建立 {n} 張工單。\n是否列印工廠工單？',
       // Customers
       'customersTitle': '客戶',
       'exportButton': '匯出',
@@ -779,6 +875,11 @@ class AppLocalizations {
       'twoYearSpent': '兩年消費：',
       'ordersLabel': '訂單',
       'noCustomersFound': '找不到客戶',
+      'noCustomerData': '找不到客戶資料。',
+      'exportPreparing': '正在準備匯出資料...',
+      'exportSuccess': '✅ 匯出成功！',
+      'exportFailed': '❌ 匯出失敗',
+      'requiredField': '必填',
       // Settings
       'settingsTitle': '設定',
       'shopInformation': '商店資訊',
@@ -847,6 +948,29 @@ class AppLocalizations {
       'noMeasurements': '尚無尺寸資料',
       'noOrdersFound': '找不到訂單',
       'profileUpdated': '資料已成功更新',
+      // Contact Log
+      'contactLog': '聯絡記錄',
+      'addContactLog': '新增記錄',
+      'contactType': '類型',
+      'contactTypeCall': '電話',
+      'contactTypeFitting': '試身',
+      'contactTypeMessage': '信息',
+      'contactTypeNote': '備注',
+      'noContactLogs': '尚無聯絡記錄',
+      'contactLogAdded': '記錄已新增',
+      'editOrderInPOS': '編輯訂單',
+      'tapToSet': '點擊設定...',
+      'timelineTitle': '時間軸',
+      'filterAll': '全部',
+      'filterContact': '聯絡',
+      'filterFitting': '試身',
+      'filterOrder': '訂單',
+      'tierNew': '新客',
+      'tierRegular': '常客',
+      'tierVip': 'VIP',
+      'followUpDate': '跟進日期',
+      'followUpDue': '跟進到期',
+      'markDone': '完成',
     },
 
     'zh_CN': {
@@ -923,6 +1047,7 @@ class AppLocalizations {
       'materialCost': '材料成本',
       'outsourcingCost': '外包成本',
       'fixedCost': '固定成本',
+      'laborCost': '人工成本',
       'totalCost': '总成本',
       'netProfit': '净利润',
       'subtotal': '小计',
@@ -936,6 +1061,7 @@ class AppLocalizations {
       'noFabricRequired': '无需布料',
       'fabricMarkedOrdered': '布料已标记为已订购',
       'fabricMarkedNotOrdered': '布料已标记为未订购',
+      'fabricSyncError': '布料状态同步失败: ',
       'receiptButton': '收据',
       'photosButton': '照片',
       'deleteOrder': '删除订单',
@@ -955,7 +1081,14 @@ class AppLocalizations {
       'loadMoreHistory': '载入更多历史',
       'markFabricOrdered': '标记布料已订购',
       'loadMoreShowing': '载入更多（显示中',
+      'allOrdersLoaded': '已载入全部 {n} 笔',
       'unexpectedError': '发生意外错误。',
+      'confirmOrderButton': '确认订单',
+      'markAsCompleteButton': '标记为完成',
+      'confirmOrderMsg': '确认此订单？',
+      'markCompleteMsg': '将此订单标记为完成？\n此操作无法撤销。',
+      'deliveryDateLabel': '交货日期',
+      'balancePaymentsLabel': '余款记录',
       // Workshop
       'workshopTitle': '工坊看板',
       'statusMeasuring': '量度',
@@ -1041,6 +1174,10 @@ class AppLocalizations {
       'pleaseAddItemsMsg': '请添加项目并选择客户',
       'enterAmountHint': '输入金额',
       'noFabricText': '无需布料',
+      'fabricReminderTitle': '订布提醒',
+      'fabricReminderSubtitle': '以下布料需要向供应商订购：',
+      'laterButton': '稍后',
+      'printJobTicketsBody': '已创建 {n} 张工单。\n是否打印工厂工单？',
       // Customers
       'customersTitle': '客户',
       'exportButton': '导出',
@@ -1051,6 +1188,11 @@ class AppLocalizations {
       'twoYearSpent': '两年消费：',
       'ordersLabel': '订单',
       'noCustomersFound': '找不到客户',
+      'noCustomerData': '找不到客户资料。',
+      'exportPreparing': '正在准备导出资料...',
+      'exportSuccess': '✅ 导出成功！',
+      'exportFailed': '❌ 导出失败',
+      'requiredField': '必填',
       // Settings
       'settingsTitle': '设置',
       'shopInformation': '商店信息',
@@ -1119,6 +1261,29 @@ class AppLocalizations {
       'noMeasurements': '尚无尺寸数据',
       'noOrdersFound': '找不到订单',
       'profileUpdated': '资料已成功更新',
+      // Contact Log
+      'contactLog': '联络记录',
+      'addContactLog': '新增记录',
+      'contactType': '类型',
+      'contactTypeCall': '电话',
+      'contactTypeFitting': '试衣',
+      'contactTypeMessage': '信息',
+      'contactTypeNote': '备注',
+      'noContactLogs': '暂无联络记录',
+      'contactLogAdded': '记录已添加',
+      'editOrderInPOS': '编辑订单',
+      'tapToSet': '点击设置...',
+      'timelineTitle': '时间轴',
+      'filterAll': '全部',
+      'filterContact': '联络',
+      'filterFitting': '试身',
+      'filterOrder': '订单',
+      'tierNew': '新客',
+      'tierRegular': '常客',
+      'tierVip': 'VIP',
+      'followUpDate': '跟进日期',
+      'followUpDue': '跟进到期',
+      'markDone': '完成',
     },
   };
 }

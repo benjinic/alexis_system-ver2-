@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../components/icon_text.dart';
 import '../components/navigation.dart';
+import '../models/workshop_order.dart';
+import '../services/database_service.dart';
 
 class MainLayout extends StatefulWidget {
   final Widget child;
@@ -17,6 +20,30 @@ class MainLayout extends StatefulWidget {
 }
 
 class _MainLayoutState extends State<MainLayout> {
+  int _urgentCount = 0;
+  StreamSubscription<List<WorkshopOrder>>? _workshopSub;
+  final _db = DatabaseService();
+
+  @override
+  void initState() {
+    super.initState();
+    _workshopSub = _db
+        .getWorkshopOrdersStream(isOnGoingOnly: true)
+        .listen((orders) {
+      final now = DateTime.now();
+      final count = orders
+          .where((o) => o.priority == 'urgent' || now.isAfter(o.dueDate))
+          .length;
+      if (mounted) setState(() => _urgentCount = count);
+    });
+  }
+
+  @override
+  void dispose() {
+    _workshopSub?.cancel();
+    super.dispose();
+  }
+
   int _getSelectedIndex(String route) {
     switch (route) {
       case '/dashboard':
@@ -62,7 +89,10 @@ class _MainLayoutState extends State<MainLayout> {
       body: isDesktop
           ? Row(
               children: [
-                Navigation(currentRoute: widget.currentRoute),
+                Navigation(
+                  currentRoute: widget.currentRoute,
+                  urgentCount: _urgentCount,
+                ),
                 Expanded(child: widget.child),
               ],
             )
@@ -82,7 +112,7 @@ class _MainLayoutState extends State<MainLayout> {
                 showUnselectedLabels: true,
                 selectedFontSize: 10,
                 unselectedFontSize: 10,
-                items: const [
+                items: [
                   BottomNavigationBarItem(
                     icon: IconText(Icons.analytics_outlined),
                     activeIcon: IconText(Icons.analytics),
@@ -109,8 +139,16 @@ class _MainLayoutState extends State<MainLayout> {
                     label: 'Fabric',
                   ),
                   BottomNavigationBarItem(
-                    icon: IconText(Icons.content_cut_outlined),
-                    activeIcon: IconText(Icons.content_cut),
+                    icon: Badge(
+                      isLabelVisible: _urgentCount > 0,
+                      label: Text(_urgentCount > 9 ? '9+' : '$_urgentCount'),
+                      child: const IconText(Icons.content_cut_outlined),
+                    ),
+                    activeIcon: Badge(
+                      isLabelVisible: _urgentCount > 0,
+                      label: Text(_urgentCount > 9 ? '9+' : '$_urgentCount'),
+                      child: const IconText(Icons.content_cut),
+                    ),
                     label: 'Shop',
                   ),
                   BottomNavigationBarItem(

@@ -55,6 +55,63 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  Future<void> _forgotPassword() async {
+    final emailCtrl = TextEditingController(text: _emailController.text.trim());
+    final cs = Theme.of(context).colorScheme;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重設密碼'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('輸入登入電郵，系統將發送重設密碼連結。', style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: emailCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              keyboardType: TextInputType.emailAddress,
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('發送'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final email = emailCtrl.text.trim();
+    if (email.isEmpty) return;
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('重設密碼連結已發送至 $email'),
+          backgroundColor: cs.primary,
+        ),
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('發送失敗：${e.message}'),
+          backgroundColor: cs.error,
+        ),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -180,6 +237,18 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           )
                         : Text(l10n.loginButton),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // 忘記密碼
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _isLoading ? null : _forgotPassword,
+                    child: Text(
+                      '忘記密碼？',
+                      style: TextStyle(color: Colors.blueGrey[600], fontSize: 13),
+                    ),
                   ),
                 ),
               ],

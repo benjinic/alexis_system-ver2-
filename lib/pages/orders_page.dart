@@ -147,7 +147,6 @@ class _OrdersPageState extends State<OrdersPage> {
       messenger.showSnackBar(
         SnackBar(
           content: Text('Failed to update fabric status: $e'),
-          backgroundColor: Colors.red,
         ),
       );
       return null;
@@ -181,8 +180,8 @@ class _OrdersPageState extends State<OrdersPage> {
         SnackBar(
           content: Text(
             !item.isFabricOrdered
-                ? '${item.service}: fabric marked as ordered'
-                : '${item.service}: fabric marked as not ordered',
+                ? '${item.service}: ${AppLocalizations.of(context).fabricMarkedOrdered}'
+                : '${item.service}: ${AppLocalizations.of(context).fabricMarkedNotOrdered}',
           ),
         ),
       );
@@ -192,7 +191,6 @@ class _OrdersPageState extends State<OrdersPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to update item fabric status: $e'),
-          backgroundColor: Colors.red,
         ),
       );
       return null;
@@ -222,78 +220,214 @@ class _OrdersPageState extends State<OrdersPage> {
     );
   }
 
-  // === 細項匯出邏輯 ===
+  // === 日期範圍選擇 → 細項匯出 ===
   Future<void> _handleExport() async {
-    // 1. 顯示 Loading 畫面 (抓取大量細項需要一點時間)
+    DateTime? fromDate;
+    DateTime? toDate;
+
+    final dateFmt = DateFormat('yyyy-MM-dd');
+    final cs = Theme.of(context).colorScheme;
+
+    // 1. 先讓用戶選擇日期範圍
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          title: const Text('選擇匯出日期範圍'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.calendar_today, color: cs.primary),
+                title: const Text('開始日期'),
+                subtitle: Text(
+                  fromDate != null ? dateFmt.format(fromDate!) : '不限（全部）',
+                  style: TextStyle(
+                    color: fromDate != null ? cs.onSurface : cs.onSurfaceVariant,
+                  ),
+                ),
+                trailing: fromDate != null
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () => setDlgState(() => fromDate = null),
+                      )
+                    : null,
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: ctx,
+                    initialDate: fromDate ?? DateTime.now(),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (picked != null) setDlgState(() => fromDate = picked);
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.calendar_month, color: cs.primary),
+                title: const Text('結束日期'),
+                subtitle: Text(
+                  toDate != null ? dateFmt.format(toDate!) : '不限（全部）',
+                  style: TextStyle(
+                    color: toDate != null ? cs.onSurface : cs.onSurfaceVariant,
+                  ),
+                ),
+                trailing: toDate != null
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () => setDlgState(() => toDate = null),
+                      )
+                    : null,
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: ctx,
+                    initialDate: toDate ?? DateTime.now(),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (picked != null) setDlgState(() => toDate = picked);
+                },
+              ),
+              if (fromDate != null && toDate != null && toDate!.isBefore(fromDate!))
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    '結束日期不能早於開始日期',
+                    style: TextStyle(color: cs.error, fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(AppLocalizations.of(ctx).cancelButton),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.download),
+              label: const Text('匯出'),
+              onPressed:
+                  (fromDate != null && toDate != null && toDate!.isBefore(fromDate!))
+                      ? null
+                      : () => Navigator.pop(ctx),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    // 2. 開始匯出
+    await _runExport(fromDate: fromDate, toDate: toDate, dateFmt: dateFmt);
+  }
+
+  Future<void> _runExport({
+    DateTime? fromDate,
+    DateTime? toDate,
+    required DateFormat dateFmt,
+  }) async {
+    final progressMsg = ValueNotifier<String>('正在準備...');
+
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (c) => const Center(child: CircularProgressIndicator()),
+      builder: (c) => Center(
+        child: Card(
+          margin: const EdgeInsets.symmetric(horizontal: 40),
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: ValueListenableBuilder<String>(
+              valueListenable: progressMsg,
+              builder: (_, msg, _) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(msg, textAlign: TextAlign.center),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
 
     try {
-      // 2. 先抓取所有的「訂單主檔」
+      progressMsg.value = '正在載入訂單清單...';
       final allOrders = await _dbService.getOrdersStream(limit: 10000).first;
+
+      // 依日期範圍過濾（toDate 包含當天 23:59:59）
+      final toDateEnd = toDate != null
+          ? DateTime(toDate.year, toDate.month, toDate.day, 23, 59, 59)
+          : null;
+      final filtered = allOrders.where((o) {
+        final d = o.createdAt ?? o.date;
+        if (d == null) return fromDate == null && toDate == null;
+        if (fromDate != null && d.isBefore(fromDate)) return false;
+        if (toDateEnd != null && d.isAfter(toDateEnd)) return false;
+        return true;
+      }).toList();
+
+      final total = filtered.length;
       final services = await _dbService.getServicesStream().first;
       final serviceByName = {
         for (final service in services) service.name: service,
       };
 
-      // 3. 【關鍵修復】逐一抓取每個訂單的「商品細項」，並組合成完整的訂單
       List<Order> fullOrders = [];
-      for (var order in allOrders) {
-        // 去 order_items 集合中把這筆訂單的商品抓出來
+      for (var i = 0; i < filtered.length; i++) {
+        final order = filtered[i];
+        progressMsg.value = '正在讀取 ${i + 1} / $total 筆訂單...';
         final items = await _dbService.getOrderItems(order.id);
         final itemsToUse = items.isNotEmpty ? items : order.items;
 
-        // 歷史鎖：已完成/取消/已付訂金的訂單保留原始價格
         final isHistorical =
             order.status.toLowerCase() == 'completed' ||
             order.status.toLowerCase() == 'cancelled' ||
             order.status.toLowerCase() == 'confirmed';
-        if (isHistorical) {
-          fullOrders.add(order.copyWith(items: itemsToUse));
-        } else {
-          fullOrders.add(
-            CostCalculationService.syncOrderWithServicePrices(
-              order.copyWith(items: itemsToUse),
-              serviceByName: serviceByName,
-            ),
-          );
-        }
+        fullOrders.add(
+          isHistorical
+              ? order.copyWith(items: itemsToUse)
+              : CostCalculationService.syncOrderWithServicePrices(
+                  order.copyWith(items: itemsToUse),
+                  serviceByName: serviceByName,
+                ),
+        );
       }
 
-      // 4. 呼叫我們寫好的 Service 產生單項明細 CSV
       final csvData = ExportService.generateItemDetailsCSV(fullOrders);
 
-      // 5. 觸發網頁下載
-      final bytes = utf8.encode('\uFEFF$csvData'); // \uFEFF 是為了防止 Excel 中文亂碼
+      // 檔名含日期範圍
+      final suffix = (fromDate != null || toDate != null)
+          ? '_${fromDate != null ? dateFmt.format(fromDate) : 'start'}'
+            '_to_${toDate != null ? dateFmt.format(toDate) : 'end'}'
+          : '';
+      final fileName = 'Alexis_Orders$suffix.csv';
+
+      final bytes = utf8.encode('﻿$csvData');
       final blob = html.Blob([bytes], 'text/csv;charset=utf-8');
       final url = html.Url.createObjectUrlFromBlob(blob);
-
       html.AnchorElement(href: url)
-        ..setAttribute('download', 'Alexis_Item_Details.csv')
+        ..setAttribute('download', fileName)
         ..click();
-
       html.Url.revokeObjectUrl(url);
 
-      // 6. 成功後，關閉 Loading 並顯示成功訊息
       if (mounted) {
-        Navigator.pop(context); // 關閉 Loading
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ 匯出成功！'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            content: Text('已匯出 $total 筆訂單　$fileName'),
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
     } catch (e) {
-      // 7. 失敗處理
       if (mounted) {
-        Navigator.pop(context); // 關閉 Loading
-
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ 匯出失敗: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(AppLocalizations.of(context).exportFailedMsg(e))),
         );
       }
     }
@@ -301,6 +435,7 @@ class _OrdersPageState extends State<OrdersPage> {
 
   void _showOrderDetails(BuildContext context, Order order) {
     bool dialogFabricOrdered = order.isFabricOrdered;
+    String dialogStatus = order.status;
 
     // 改用 showDialog (中間彈出)
     showDialog(
@@ -332,14 +467,14 @@ class _OrdersPageState extends State<OrdersPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Order Details',
+                              AppLocalizations.of(context).orderDetails,
                               style: Theme.of(context).textTheme.headlineSmall,
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'Order #${order.id}',
                               style: TextStyle(
-                                color: Theme.of(context).primaryColor,
+                                color: Theme.of(context).colorScheme.primary,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 16,
                               ),
@@ -363,70 +498,73 @@ class _OrdersPageState extends State<OrdersPage> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                if (order.status != 'completed' &&
-                                    order.status != 'cancelled')
-                                  InkWell(
-                                    onTap: () async {
-                                      final updatedStatus =
-                                          await _toggleFabricOrdered(
-                                            orderId: order.id,
-                                            currentStatus: dialogFabricOrdered,
-                                          );
-                                      if (updatedStatus != null &&
-                                          context.mounted) {
-                                        setDialogState(() {
-                                          dialogFabricOrdered = updatedStatus;
-                                        });
-                                      }
-                                    },
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 8,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: dialogFabricOrdered
-                                            ? Colors.green[50]
-                                            : Colors.red[50],
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
+                                if (dialogStatus != 'completed' &&
+                                    dialogStatus != 'cancelled')
+                                  Builder(builder: (ctx) {
+                                    final cs = Theme.of(ctx).colorScheme;
+                                    return InkWell(
+                                      onTap: () async {
+                                        final updatedStatus =
+                                            await _toggleFabricOrdered(
+                                              orderId: order.id,
+                                              currentStatus: dialogFabricOrdered,
+                                            );
+                                        if (updatedStatus != null &&
+                                            context.mounted) {
+                                          setDialogState(() {
+                                            dialogFabricOrdered = updatedStatus;
+                                          });
+                                        }
+                                      },
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
+                                        ),
+                                        decoration: BoxDecoration(
                                           color: dialogFabricOrdered
-                                              ? Colors.green[300]!
-                                              : Colors.red[300]!,
+                                              ? cs.tertiaryContainer
+                                              : cs.errorContainer,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(
+                                            color: dialogFabricOrdered
+                                                ? cs.tertiary.withValues(alpha: 0.5)
+                                                : cs.error.withValues(alpha: 0.5),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            IconText(
+                                              dialogFabricOrdered
+                                                  ? Icons.inventory_2
+                                                  : Icons.shopping_cart_checkout,
+                                              color: dialogFabricOrdered
+                                                  ? cs.onTertiaryContainer
+                                                  : cs.onErrorContainer,
+                                              size: 16,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              dialogFabricOrdered
+                                                  ? 'Fabric Ready'
+                                                  : 'Mark Fabric Ordered',
+                                              style: TextStyle(
+                                                color: dialogFabricOrdered
+                                                    ? cs.onTertiaryContainer
+                                                    : cs.onErrorContainer,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          IconText(
-                                            dialogFabricOrdered
-                                                ? Icons.inventory_2
-                                                : Icons.shopping_cart_checkout,
-                                            color: dialogFabricOrdered
-                                                ? Colors.green[700]
-                                                : Colors.red[700],
-                                            size: 16,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            dialogFabricOrdered
-                                                ? 'Fabric Ready'
-                                                : 'Mark Fabric Ordered',
-                                            style: TextStyle(
-                                              color: dialogFabricOrdered
-                                                  ? Colors.green[700]
-                                                  : Colors.red[700],
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  )
+                                    );
+                                  })
                                 else
                                   const SizedBox.shrink(),
-                                _buildStatusBadge(order.status),
+                                _buildStatusBadge(dialogStatus),
                               ],
                             ),
                             const SizedBox(height: 16),
@@ -438,7 +576,7 @@ class _OrdersPageState extends State<OrdersPage> {
                             ),
                             _buildDetailRow(
                               Icons.calendar_today,
-                              'Date',
+                              AppLocalizations.of(context).dateLabel,
                               order.createdAt != null
                                   ? DateFormat(
                                       'yyyy-MM-dd HH:mm',
@@ -450,6 +588,18 @@ class _OrdersPageState extends State<OrdersPage> {
                               AppLocalizations.of(context).paymentLabel,
                               order.paymentMethod,
                             ),
+                            if (order.deliveryDate != null)
+                              _buildDetailRow(
+                                Icons.event_outlined,
+                                AppLocalizations.of(context).deliveryDateLabel,
+                                DateFormat('yyyy-MM-dd').format(order.deliveryDate!),
+                              ),
+                            if (order.notes.isNotEmpty)
+                              _buildDetailRow(
+                                Icons.notes_outlined,
+                                AppLocalizations.of(context).notesLabel,
+                                order.notes,
+                              ),
                             const SizedBox(height: 24),
                             Text(
                               AppLocalizations.of(context).itemsLabel,
@@ -521,53 +671,60 @@ class _OrdersPageState extends State<OrdersPage> {
                                           .toList()
                                         ..addAll([
                                           const Divider(height: 24),
-                                          const Text(
-                                            'Internal Cost & Profit',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.grey,
-                                              fontWeight: FontWeight.bold,
-                                              letterSpacing: 0.5,
+                                          Builder(
+                                            builder: (ctx) => Text(
+                                              AppLocalizations.of(ctx).internalCostProfit,
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                                                fontWeight: FontWeight.bold,
+                                                letterSpacing: 0.5,
+                                              ),
                                             ),
                                           ),
                                           const SizedBox(height: 4),
                                           Builder(
                                             builder: (ctx) {
-                                              final l = AppLocalizations.of(
-                                                ctx,
-                                              );
+                                              final l = AppLocalizations.of(ctx);
+                                              final cs = Theme.of(ctx).colorScheme;
                                               return Column(
                                                 children: [
                                                   _buildFinancialRow(
                                                     l.materialCost,
                                                     -detailOrder.materialCost,
                                                     isCost: true,
-                                                    color: Colors.red[300],
+                                                    color: cs.error,
                                                   ),
                                                   _buildFinancialRow(
                                                     l.outsourcingCost,
-                                                    -detailOrder
-                                                        .outsourcingCost,
+                                                    -detailOrder.outsourcingCost,
                                                     isCost: true,
-                                                    color: Colors.red[300],
+                                                    color: cs.error,
                                                   ),
                                                   _buildFinancialRow(
                                                     l.fixedCost,
                                                     -detailOrder.fixedCost,
                                                     isCost: true,
-                                                    color: Colors.red[300],
+                                                    color: cs.error,
                                                   ),
+                                                  if (detailOrder.laborCost > 0)
+                                                    _buildFinancialRow(
+                                                      l.laborCost,
+                                                      -detailOrder.laborCost,
+                                                      isCost: true,
+                                                      color: cs.error,
+                                                    ),
                                                   const Divider(),
                                                   _buildFinancialRow(
                                                     l.totalCost,
                                                     -detailOrder.totalCost,
                                                     isCost: true,
-                                                    color: Colors.red[300],
+                                                    color: cs.error,
                                                   ),
                                                   _buildFinancialRow(
                                                     l.netProfit,
                                                     totalProfit,
-                                                    color: Colors.green[700],
+                                                    color: cs.tertiary,
                                                     isBold: true,
                                                   ),
                                                   const Divider(height: 32),
@@ -591,18 +748,62 @@ class _OrdersPageState extends State<OrdersPage> {
                                                   _buildFinancialRow(
                                                     l.depositPaid,
                                                     detailOrder.deposit,
-                                                    color: Colors.green,
+                                                    color: cs.tertiary,
                                                   ),
                                                   _buildFinancialRow(
                                                     l.balanceDue,
                                                     detailOrder.balance,
-                                                    color:
-                                                        detailOrder.balance > 0
-                                                        ? Colors.red
-                                                        : Colors.grey,
-                                                    isBold:
-                                                        detailOrder.balance > 0,
+                                                    color: detailOrder.balance > 0
+                                                        ? cs.error
+                                                        : cs.onSurfaceVariant,
+                                                    isBold: detailOrder.balance > 0,
                                                   ),
+                                                  if (detailOrder.payments.isNotEmpty) ...[
+                                                    const SizedBox(height: 16),
+                                                    const Divider(),
+                                                    Text(
+                                                      l.balancePaymentsLabel,
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        fontWeight: FontWeight.w600,
+                                                        color: cs.onSurfaceVariant,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 8),
+                                                    ...detailOrder.payments.map(
+                                                      (p) => Padding(
+                                                        padding: const EdgeInsets.only(bottom: 4),
+                                                        child: Row(
+                                                          children: [
+                                                            Text(
+                                                              DateFormat('MM/dd').format(p.paidAt),
+                                                              style: TextStyle(
+                                                                fontSize: 12,
+                                                                color: cs.onSurfaceVariant,
+                                                              ),
+                                                            ),
+                                                            const SizedBox(width: 8),
+                                                            Text(
+                                                              p.method,
+                                                              style: TextStyle(
+                                                                fontSize: 12,
+                                                                color: cs.onSurfaceVariant,
+                                                              ),
+                                                            ),
+                                                            const Spacer(),
+                                                            Text(
+                                                              '\$${p.amount.toStringAsFixed(0)}',
+                                                              style: TextStyle(
+                                                                fontSize: 12,
+                                                                fontWeight: FontWeight.w600,
+                                                                color: cs.tertiary,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ],
                                               );
                                             },
@@ -629,7 +830,20 @@ class _OrdersPageState extends State<OrdersPage> {
                                     context: context,
                                     barrierDismissible: false,
                                     builder: (c) => const Center(
-                                      child: CircularProgressIndicator(),
+                                      child: Card(
+                                        margin: EdgeInsets.symmetric(horizontal: 60),
+                                        child: Padding(
+                                          padding: EdgeInsets.all(28),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              CircularProgressIndicator(),
+                                              SizedBox(height: 16),
+                                              Text('Loading...'),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   );
                                   try {
@@ -670,7 +884,7 @@ class _OrdersPageState extends State<OrdersPage> {
                                   }
                                 },
                                 icon: const IconText(Icons.edit),
-                                label: const Text('Edit'),
+                                label: Text(AppLocalizations.of(context).editButton),
                                 style: OutlinedButton.styleFrom(
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 16,
@@ -688,7 +902,20 @@ class _OrdersPageState extends State<OrdersPage> {
                                     context: context,
                                     barrierDismissible: false,
                                     builder: (c) => const Center(
-                                      child: CircularProgressIndicator(),
+                                      child: Card(
+                                        margin: EdgeInsets.symmetric(horizontal: 60),
+                                        child: Padding(
+                                          padding: EdgeInsets.all(28),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              CircularProgressIndicator(),
+                                              SizedBox(height: 16),
+                                              Text('Loading...'),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   );
 
@@ -731,7 +958,7 @@ class _OrdersPageState extends State<OrdersPage> {
                                   }
                                 },
                                 icon: const IconText(Icons.print),
-                                label: const Text('Receipt'),
+                                label: Text(AppLocalizations.of(context).receiptButton),
                                 style: OutlinedButton.styleFrom(
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 16,
@@ -760,12 +987,61 @@ class _OrdersPageState extends State<OrdersPage> {
                               );
                             },
                             icon: const IconText(Icons.photo_library_outlined),
-                            label: const Text('Photos'),
+                            label: Text(AppLocalizations.of(context).photosButton),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 16),
                             ),
                           ),
                         ),
+                        if (dialogStatus == 'pending') ...[
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: () => _changeOrderStatus(
+                                context: context,
+                                order: order.copyWith(status: dialogStatus),
+                                newStatus: 'confirmed',
+                                setDialogState: setDialogState,
+                                onStatusChanged: (s) => dialogStatus = s,
+                              ),
+                              icon: const IconText(Icons.thumb_up_outlined),
+                              label: Text(AppLocalizations.of(context).confirmOrderButton),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor:
+                                    Theme.of(context).colorScheme.primary,
+                                foregroundColor:
+                                    Theme.of(context).colorScheme.onPrimary,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                              ),
+                            ),
+                          ),
+                        ] else if (dialogStatus == 'confirmed') ...[
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: () => _changeOrderStatus(
+                                context: context,
+                                order: order.copyWith(status: dialogStatus),
+                                newStatus: 'completed',
+                                setDialogState: setDialogState,
+                                onStatusChanged: (s) => dialogStatus = s,
+                              ),
+                              icon: const IconText(Icons.check_circle_outline),
+                              label: Text(AppLocalizations.of(context).markAsCompleteButton),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor:
+                                    Theme.of(context).colorScheme.tertiary,
+                                foregroundColor:
+                                    Theme.of(context).colorScheme.onTertiary,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                              ),
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 12),
                         SizedBox(
                           width: double.infinity,
@@ -776,12 +1052,18 @@ class _OrdersPageState extends State<OrdersPage> {
                               AppLocalizations.of(context).deleteOrder,
                             ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red[50],
-                              foregroundColor: Colors.red,
+                              backgroundColor: Theme.of(
+                                context,
+                              ).colorScheme.errorContainer,
+                              foregroundColor:
+                                  Theme.of(context).colorScheme.error,
                               elevation: 0,
                               padding: const EdgeInsets.symmetric(vertical: 16),
                               side: BorderSide(
-                                color: Colors.red.withValues(alpha: 0.3),
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .error
+                                    .withValues(alpha: 0.3),
                               ),
                             ),
                           ),
@@ -807,17 +1089,17 @@ class _OrdersPageState extends State<OrdersPage> {
     final fabricStatusLabel = !requiresFabric
         ? 'No Fabric Required'
         : (item.isFabricOrdered ? 'Fabric Ordered' : 'Pending Order');
+    final cs = Theme.of(context).colorScheme;
     final fabricStatusColor = !requiresFabric
-        ? Colors.blueGrey
-        : (item.isFabricOrdered ? Colors.green : Colors.orange);
-
+        ? cs.onSurfaceVariant
+        : (item.isFabricOrdered ? cs.tertiary : cs.error);
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: cs.surfaceContainerLow,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -828,12 +1110,12 @@ class _OrdersPageState extends State<OrdersPage> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.blue[50],
+                  color: cs.primaryContainer,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: IconText(
                   Icons.checkroom,
-                  color: Colors.blue[800],
+                  color: cs.onPrimaryContainer,
                   size: 20,
                 ),
               ),
@@ -853,7 +1135,7 @@ class _OrdersPageState extends State<OrdersPage> {
                           'Fabric: ${item.fabricName} (${item.fabricUsed}m)',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey[600],
+                            color: cs.onSurfaceVariant,
                           ),
                         ),
                       ),
@@ -942,14 +1224,15 @@ class _OrdersPageState extends State<OrdersPage> {
   Widget _buildFabricInfoCard(OrderItem item, MaterialItem? material) {
     final imageUrl = material?.imageUrl;
     final hasImage = imageUrl != null && imageUrl.trim().isNotEmpty;
+    final cs = Theme.of(context).colorScheme;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cs.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.blueGrey.withValues(alpha: 0.15)),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1012,11 +1295,12 @@ class _OrdersPageState extends State<OrdersPage> {
   }
 
   Widget _buildFabricImageFallback() {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       height: 96,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.blueGrey[50],
+        color: cs.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -1024,12 +1308,12 @@ class _OrdersPageState extends State<OrdersPage> {
         children: [
           IconText(
             Icons.image_not_supported_outlined,
-            color: Colors.blueGrey[300],
+            color: cs.onSurfaceVariant,
           ),
           const SizedBox(height: 6),
           Text(
             'No fabric image',
-            style: TextStyle(fontSize: 12, color: Colors.blueGrey[400]),
+            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
           ),
         ],
       ),
@@ -1037,24 +1321,85 @@ class _OrdersPageState extends State<OrdersPage> {
   }
 
   Widget _buildFabricMetaChip(IconData icon, String label) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.blueGrey[50],
+        color: cs.secondaryContainer,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconText(icon, size: 14, color: Colors.blueGrey[700]),
+          IconText(icon, size: 14, color: cs.onSecondaryContainer),
           const SizedBox(width: 4),
           Text(
             label,
-            style: TextStyle(fontSize: 12, color: Colors.blueGrey[700]),
+            style: TextStyle(fontSize: 12, color: cs.onSecondaryContainer),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _changeOrderStatus({
+    required BuildContext context,
+    required Order order,
+    required String newStatus,
+    required StateSetter setDialogState,
+    required void Function(String) onStatusChanged,
+  }) async {
+    final l10n = AppLocalizations.of(context);
+    final label = newStatus == 'confirmed'
+        ? l10n.confirmOrderButton
+        : l10n.markAsCompleteButton;
+    final message = newStatus == 'confirmed'
+        ? l10n.confirmOrderMsg
+        : l10n.markCompleteMsg;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(label),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(AppLocalizations.of(ctx).cancelButton),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: newStatus == 'confirmed'
+                  ? Theme.of(ctx).colorScheme.primary
+                  : Theme.of(ctx).colorScheme.tertiary,
+              foregroundColor: newStatus == 'confirmed'
+                  ? Theme.of(ctx).colorScheme.onPrimary
+                  : Theme.of(ctx).colorScheme.onTertiary,
+            ),
+            child: Text(label),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    try {
+      await _dbService.updateOrder(order.copyWith(status: newStatus));
+      if (!mounted) return;
+      setDialogState(() => onStatusChanged(newStatus));
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Order #${order.id} → ${newStatus.toUpperCase()}'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Failed to update status: $e')),
+      );
+    }
   }
 
   // Confirmation dialog for order deletion
@@ -1069,7 +1414,7 @@ class _OrdersPageState extends State<OrdersPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(AppLocalizations.of(ctx).cancelButton),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -1084,23 +1429,19 @@ class _OrdersPageState extends State<OrdersPage> {
                 messenger.showSnackBar(
                   const SnackBar(
                     content: Text('Order deleted successfully'),
-                    backgroundColor: Colors.grey,
                   ),
                 );
               } catch (e) {
                 if (mounted) {
                   messenger.showSnackBar(
-                    SnackBar(
-                      content: Text('Error deleting order: $e'),
-                      backgroundColor: Colors.red,
-                    ),
+                    SnackBar(content: Text('Error deleting order: $e')),
                   );
                 }
               }
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+              foregroundColor: Theme.of(ctx).colorScheme.onError,
             ),
             child: const Text('Delete'),
           ),
@@ -1133,16 +1474,15 @@ class _OrdersPageState extends State<OrdersPage> {
         onPressed: _navigateToPOS,
         icon: const IconText(Icons.add),
         label: Text(AppLocalizations.of(context).newOrder.toUpperCase()),
-        backgroundColor: Theme.of(context).primaryColor,
-        foregroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
       ),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: TextField(
               controller: _searchController,
-              style: const TextStyle(color: Colors.black),
               onChanged: (value) {
                 setState(() {
                   _searchQuery = value.toLowerCase();
@@ -1150,10 +1490,9 @@ class _OrdersPageState extends State<OrdersPage> {
               },
               decoration: InputDecoration(
                 hintText: AppLocalizations.of(context).searchOrdersHint,
-                hintStyle: TextStyle(color: Colors.grey[600]),
                 prefixIcon: const IconText(Icons.search),
                 filled: true,
-                fillColor: Colors.grey[100],
+                fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -1165,9 +1504,44 @@ class _OrdersPageState extends State<OrdersPage> {
               ),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Row(
+              children: [
+                FilterChip(
+                  label: Text(AppLocalizations.of(context).filterAll),
+                  selected: !_filterPending && !_filterOutstanding,
+                  onSelected: (_) => setState(() {
+                    _filterPending = false;
+                    _filterOutstanding = false;
+                  }),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: Text(AppLocalizations.of(context).pendingOrders),
+                  selected: _filterPending,
+                  onSelected: (v) => setState(() {
+                    _filterPending = v;
+                    if (v) _filterOutstanding = false;
+                  }),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: Text(AppLocalizations.of(context).outstandingOrders),
+                  selected: _filterOutstanding,
+                  onSelected: (v) => setState(() {
+                    _filterOutstanding = v;
+                    if (v) _filterPending = false;
+                  }),
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: StreamBuilder<List<Order>>(
-              stream: _dbService.getOrdersStream(limit: _ordersLimit),
+              stream: _filterOutstanding
+                  ? _dbService.getOrdersStream()  // no limit — scan all to find every balance > 0
+                  : _dbService.getOrdersStream(limit: _ordersLimit),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return Center(child: Text('Error: ${snapshot.error}'));
@@ -1211,6 +1585,7 @@ class _OrdersPageState extends State<OrdersPage> {
                 // 篩選尚欠款項的訂單
                 else if (_filterOutstanding) {
                   orders = orders.where((o) => o.balance > 0).toList();
+                  orders.sort((a, b) => b.balance.compareTo(a.balance));
                 }
 
                 if (orders.isEmpty) {
@@ -1223,7 +1598,7 @@ class _OrdersPageState extends State<OrdersPage> {
                               ? Icons.receipt_long_outlined
                               : Icons.search_off,
                           size: 64,
-                          color: Colors.grey[300],
+                          color: Theme.of(context).colorScheme.outlineVariant,
                         ),
                         const SizedBox(height: 16),
                         Text(
@@ -1232,7 +1607,8 @@ class _OrdersPageState extends State<OrdersPage> {
                               : AppLocalizations.of(context).noMatchingOrders,
                           style: TextStyle(
                             fontSize: 16,
-                            color: Colors.grey[500],
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                         const SizedBox(height: 24),
@@ -1259,30 +1635,99 @@ class _OrdersPageState extends State<OrdersPage> {
                   );
                 }
 
-                return ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
-                  // Add 1 extra item for load more button at bottom
-                  itemCount: orders.length + 1,
-                  itemBuilder: (context, index) {
-                    if (index == orders.length) {
-                      // Load More button at bottom
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 20.0),
-                        child: Center(
-                          child: TextButton.icon(
-                            onPressed: _loadMoreOrders,
-                            icon: const IconText(Icons.expand_more),
-                            label: Text(
-                              AppLocalizations.of(
-                                context,
-                              ).loadMoreShowing(_ordersLimit),
-                            ),
-                          ),
+                final totalOutstanding = _filterOutstanding
+                    ? orders.fold(0.0, (sum, o) => sum + o.balance)
+                    : 0.0;
+
+                return Column(
+                  children: [
+                    if (_filterOutstanding)
+                      Container(
+                        margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
                         ),
-                      );
-                    }
-                    return _buildOrderCard(context, orders[index]);
-                  },
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.errorContainer,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            IconText(
+                              Icons.account_balance_wallet_outlined,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onErrorContainer,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '${orders.length} 筆待收款',
+                                style: TextStyle(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onErrorContainer,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '\$${totalOutstanding.toStringAsFixed(0)}',
+                              style: TextStyle(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onErrorContainer,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+                        itemCount: orders.length + 1,
+                        itemBuilder: (context, index) {
+                          if (index == orders.length) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 20.0,
+                              ),
+                              child: Center(
+                                child: _filterOutstanding ||
+                                        orders.length < _ordersLimit
+                                    ? Text(
+                                        AppLocalizations.of(
+                                          context,
+                                        ).allOrdersLoaded(orders.length),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                        ),
+                                      )
+                                    : TextButton.icon(
+                                        onPressed: _loadMoreOrders,
+                                        icon: const IconText(Icons.expand_more),
+                                        label: Text(
+                                          AppLocalizations.of(
+                                            context,
+                                          ).loadMoreShowing(_ordersLimit),
+                                        ),
+                                      ),
+                              ),
+                            );
+                          }
+                          return _buildOrderCard(context, orders[index]);
+                        },
+                      ),
+                    ),
+                  ],
                 );
               },
             ),
@@ -1306,9 +1751,17 @@ class _OrdersPageState extends State<OrdersPage> {
                   serviceByName: _serviceByName,
                 )
               : order);
+    final now = DateTime.now();
+    final isOverdue = order.deliveryDate != null &&
+        order.deliveryDate!.isBefore(now) &&
+        syncedOrder.balance > 0;
+    final isCompletedUnpaid =
+        order.status == 'completed' && syncedOrder.balance > 0;
+    final cs = Theme.of(context).colorScheme;
     return Card(
       elevation: 1,
       margin: const EdgeInsets.only(bottom: 12),
+      color: isOverdue ? cs.errorContainer.withValues(alpha: 0.25) : null,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
         onTap: () => _showOrderDetails(context, order),
@@ -1334,15 +1787,15 @@ class _OrdersPageState extends State<OrdersPage> {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.grey[200],
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
                             '#${order.id}',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
-                              color: Colors.black87,
+                              color: Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
                         ),
@@ -1358,45 +1811,81 @@ class _OrdersPageState extends State<OrdersPage> {
                         if (order.status != 'completed' &&
                             order.status != 'cancelled') ...[
                           const SizedBox(height: 8),
+                          Builder(builder: (ctx) {
+                            final cs = Theme.of(ctx).colorScheme;
+                            final ordered = order.isFabricOrdered;
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: ordered
+                                    ? cs.tertiaryContainer
+                                    : cs.errorContainer,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: ordered
+                                      ? cs.tertiary.withValues(alpha: 0.5)
+                                      : cs.error.withValues(alpha: 0.5),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconText(
+                                    ordered
+                                        ? Icons.check_circle_outline
+                                        : Icons.warning_amber_rounded,
+                                    color: ordered
+                                        ? cs.onTertiaryContainer
+                                        : cs.onErrorContainer,
+                                    size: 14,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    ordered ? 'Fabric Ordered' : 'Pending',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: ordered
+                                          ? cs.onTertiaryContainer
+                                          : cs.onErrorContainer,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                        ] else if (isCompletedUnpaid) ...[
+                          const SizedBox(height: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 6,
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: order.isFabricOrdered
-                                  ? Colors.green[50]
-                                  : Colors.red[50],
+                              color: cs.secondaryContainer,
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(
-                                color: order.isFabricOrdered
-                                    ? Colors.green[200]!
-                                    : Colors.red[200]!,
+                                color: cs.secondary.withValues(alpha: 0.5),
                               ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconText(
-                                  order.isFabricOrdered
-                                      ? Icons.check_circle_outline
-                                      : Icons.warning_amber_rounded,
-                                  color: order.isFabricOrdered
-                                      ? Colors.green[700]
-                                      : Colors.red[700],
+                                  Icons.check_circle_outline,
+                                  color: cs.onSecondaryContainer,
                                   size: 14,
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  order.isFabricOrdered
-                                      ? 'Fabric Ordered'
-                                      : 'Pending',
+                                  'Completed · Unpaid',
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
-                                    color: order.isFabricOrdered
-                                        ? Colors.green[700]
-                                        : Colors.red[700],
+                                    color: cs.onSecondaryContainer,
                                   ),
                                 ),
                               ],
@@ -1410,9 +1899,36 @@ class _OrdersPageState extends State<OrdersPage> {
                               : 'No items',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey[600],
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
+                        if (order.deliveryDate != null) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconText(
+                                isOverdue
+                                    ? Icons.warning_amber_rounded
+                                    : Icons.event_outlined,
+                                size: 12,
+                                color: isOverdue ? cs.error : cs.secondary,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                isOverdue
+                                    ? 'Overdue ${DateFormat('MM/dd').format(order.deliveryDate!)}'
+                                    : 'Due ${DateFormat('MM/dd').format(order.deliveryDate!)}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isOverdue ? cs.error : cs.secondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -1426,7 +1942,7 @@ class _OrdersPageState extends State<OrdersPage> {
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: Theme.of(context).primaryColor,
+                          color: Theme.of(context).colorScheme.primary,
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -1436,9 +1952,9 @@ class _OrdersPageState extends State<OrdersPage> {
                           padding: const EdgeInsets.only(bottom: 4),
                           child: Text(
                             'Due: \$${syncedOrder.balance.toStringAsFixed(0)}',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
-                              color: Colors.red,
+                              color: Theme.of(context).colorScheme.error,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -1447,7 +1963,9 @@ class _OrdersPageState extends State<OrdersPage> {
                       // 日期顯示
                       Text(
                         order.createdAt != null
-                            ? DateFormat('MM/dd').format(order.createdAt!)
+                            ? (DateTime.now().difference(order.createdAt!).inDays > 365
+                                ? DateFormat('yy/MM/dd').format(order.createdAt!)
+                                : DateFormat('MM/dd').format(order.createdAt!))
                             : '',
                         style: TextStyle(
                           fontSize: 12,
@@ -1474,19 +1992,20 @@ class _OrdersPageState extends State<OrdersPage> {
   }
 
   Widget _buildStatusBadge(String status) {
+    final cs = Theme.of(context).colorScheme;
     Color color;
     switch (status.toLowerCase()) {
       case 'completed':
-        color = Colors.green;
+        color = cs.tertiary;
         break;
       case 'confirmed':
-        color = Colors.blue;
+        color = cs.primary;
         break;
       case 'pending':
-        color = Colors.orange;
+        color = cs.secondary;
         break;
       default:
-        color = Colors.grey;
+        color = cs.outline;
     }
 
     return Container(
@@ -1569,11 +2088,12 @@ class _OrdersPageState extends State<OrdersPage> {
                   ? FontWeight.bold
                   : FontWeight.normal,
               fontSize: isTotal ? 16 : 14,
-              color:
-                  color ??
+              color: color ??
                   (isCost
-                      ? Colors.red[300]
-                      : (isTotal ? Colors.black : Colors.grey[800])),
+                      ? Theme.of(context).colorScheme.error
+                      : (isTotal
+                          ? Theme.of(context).colorScheme.onSurface
+                          : Theme.of(context).colorScheme.onSurfaceVariant)),
             ),
           ),
         ],

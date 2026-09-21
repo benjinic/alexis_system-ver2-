@@ -117,21 +117,23 @@ class _DashboardPageState extends State<DashboardPage> {
             const SizedBox(height: 32),
 
             // Revenue Chart
-            Container(
-              margin: const EdgeInsets.only(bottom: 32),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x1a000000),
-                    blurRadius: 4,
-                    offset: Offset(0, 2),
-                  ),
-                ],
+            Builder(
+              builder: (context) => Container(
+                margin: const EdgeInsets.only(bottom: 32),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: const RevenueChart(),
               ),
-              child: const RevenueChart(),
             ),
 
             // Recent Orders and Quick Actions
@@ -315,9 +317,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   icon: Icons.paid_outlined, // 更有質感的 Icon
                   trend: subtext,
                   trendUp: true,
-                  // Bento 樣式：深色背景 + 白字
-                  backgroundColor: isBento ? const Color(0xFF1E1E2C) : null,
-                  textColor: isBento ? Colors.white : null,
+                  // Bento 樣式：inverseSurface 深色強調
+                  backgroundColor: isBento ? Theme.of(context).colorScheme.inverseSurface : null,
+                  textColor: isBento ? Theme.of(context).colorScheme.onInverseSurface : null,
                 ),
                 Positioned(
                   top: 4,
@@ -325,7 +327,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   child: PopupMenuButton<String>(
                     icon: IconText(
                       Icons.filter_list,
-                      color: isBento ? Colors.white54 : Colors.grey[600],
+                      color: isBento
+                          ? Theme.of(context).colorScheme.onInverseSurface.withValues(alpha: 0.6)
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                     onSelected: (String choice) {
                       if (choice == 'Custom') {
@@ -432,9 +436,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 );
               },
-              // Bento 樣式：琥珀金背景
-              backgroundColor: isBento ? const Color(0xFFFFB74D) : null,
-              textColor: isBento ? Colors.black87 : null,
+              // Bento 樣式：tertiaryContainer
+              backgroundColor: isBento ? Theme.of(context).colorScheme.tertiaryContainer : null,
+              textColor: isBento ? Theme.of(context).colorScheme.onTertiaryContainer : null,
             ),
             Positioned(
               top: 4,
@@ -442,7 +446,9 @@ class _DashboardPageState extends State<DashboardPage> {
               child: PopupMenuButton<String>(
                 icon: IconText(
                   Icons.filter_list,
-                  color: isBento ? Colors.black54 : Colors.grey[400],
+                  color: isBento
+                      ? Theme.of(context).colorScheme.onTertiaryContainer.withValues(alpha: 0.6)
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
                   size: 20,
                 ),
                 tooltip: 'Filter Time',
@@ -516,9 +522,9 @@ class _DashboardPageState extends State<DashboardPage> {
           onTap: () {
             Navigator.pushReplacementNamed(context, '/workshop');
           },
-          // Bento 樣式：淺藍背景，深青文字
-          backgroundColor: isBento ? const Color(0xFFE0F7FA) : null,
-          textColor: isBento ? Colors.teal[800] : null,
+          // Bento 樣式：secondaryContainer
+          backgroundColor: isBento ? Theme.of(context).colorScheme.secondaryContainer : null,
+          textColor: isBento ? Theme.of(context).colorScheme.onSecondaryContainer : null,
         );
       },
     );
@@ -529,6 +535,18 @@ class _DashboardPageState extends State<DashboardPage> {
     return StreamBuilder<List<Order>>(
       stream: DatabaseService().getOrdersStream(isIncompleteOnly: true),
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return StatCard(
+            title: AppLocalizations.of(context).outstanding,
+            value: 'Error',
+            icon: Icons.warning_amber_outlined,
+            trend: snapshot.error.toString().split('\n').first,
+            trendUp: false,
+            backgroundColor: isBento ? Theme.of(context).colorScheme.errorContainer : null,
+            textColor: isBento ? Theme.of(context).colorScheme.onErrorContainer : null,
+          );
+        }
+
         String value = '\$0';
         String subtext = AppLocalizations.of(context).allPaid;
         bool hasDebt = false;
@@ -561,9 +579,9 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
             );
           },
-          // Bento 樣式：淺紅背景，深紅文字
-          backgroundColor: isBento ? const Color(0xFFFFEBEE) : null,
-          textColor: isBento ? Colors.red[900] : null,
+          // Bento 樣式：errorContainer
+          backgroundColor: isBento ? Theme.of(context).colorScheme.errorContainer : null,
+          textColor: isBento ? Theme.of(context).colorScheme.onErrorContainer : null,
         );
       },
     );
@@ -590,9 +608,9 @@ class _DashboardPageState extends State<DashboardPage> {
               MaterialPageRoute(builder: (context) => const CustomersScreen()),
             );
           },
-          // Bento 樣式：維持白色，作為視覺緩衝
-          backgroundColor: isBento ? Colors.white : null,
-          textColor: isBento ? Colors.black87 : null,
+          // Bento 樣式：surfaceContainerHigh
+          backgroundColor: isBento ? Theme.of(context).colorScheme.surfaceContainerHigh : null,
+          textColor: isBento ? Theme.of(context).colorScheme.onSurface : null,
         );
       },
     );
@@ -753,9 +771,9 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Quick Actions',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            Text(
+              AppLocalizations.of(context).quickActions,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
             _buildActionButton(

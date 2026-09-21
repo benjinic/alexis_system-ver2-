@@ -27,21 +27,30 @@ class _SettingsPageState extends State<SettingsPage> {
     Color(0xFFFFB74D),
     Color(0xFF81C784),
     Color(0xFFCE93D8),
-    Colors.white,
   ];
   static const List<Color> _textColorOptions = [
     Colors.white,
     Color(0xFFE0E0E0),
     Color(0xFFBDBDBD),
     Color(0xFFFFF9C4),
-    Color(0xFFB3E5FC),
   ];
 
-  // 預設值
-  String _currency = 'USD';
+  // 自訂色票選色盤（24 色）
+  static const List<Color> _colorPalette = [
+    Color(0xFFEF5350), Color(0xFFEC407A), Color(0xFFAB47BC), Color(0xFF7E57C2),
+    Color(0xFF5C6BC0), Color(0xFF42A5F5), Color(0xFF29B6F6), Color(0xFF26C6DA),
+    Color(0xFF26A69A), Color(0xFF66BB6A), Color(0xFF9CCC65), Color(0xFFFFEE58),
+    Color(0xFFFFA726), Color(0xFFFF7043), Color(0xFF8D6E63), Color(0xFF78909C),
+    Color(0xFFBDBDBD), Colors.white,    Color(0xFFFFF9C4), Color(0xFFB3E5FC),
+    Color(0xFF64B5F6), Color(0xFFFFB74D), Color(0xFF81C784), Color(0xFFCE93D8),
+  ];
+
+  // 預設值（與 SettingsService.loadSettings() 一致）
+  String _currency = 'HKD';
   String _language = 'English';
   String _unit = 'Meters';
   bool _enableNotifications = true;
+  ThemeMode _themeMode = ThemeMode.dark;
   Color _accentColor = const Color(0xFF64B5F6);
   Color _textColor = Colors.white;
   Color _headingTextColor = Colors.white;
@@ -78,6 +87,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _headingTextColor = Color(settings['headingTextColor']);
       _cardTitleColor = Color(settings['cardTitleColor']);
       _sidebarTextColor = Color(settings['sidebarTextColor']);
+      _themeMode = _settingsService.themeModeNotifier.value;
       _isLoading = false;
     });
   }
@@ -161,15 +171,6 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
-  // 更新訂單號碼
-  Future<void> _updateOrderNumber() async {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Order ID counter is now managed by Cloud Functions.'),
-      ),
-    );
-  }
-
   Future<void> _saveAllSettings() async {
     final orderText = _orderIdController.text.trim();
     final parsedOrderId = int.tryParse(orderText);
@@ -201,6 +202,7 @@ class _SettingsPageState extends State<SettingsPage> {
         _settingsService.setHeadingTextColor(_headingTextColor.toARGB32()),
         _settingsService.setCardTitleColor(_cardTitleColor.toARGB32()),
         _settingsService.setSidebarTextColor(_sidebarTextColor.toARGB32()),
+        _settingsService.setThemeMode(_themeMode),
       ]);
 
       // Reload from persisted sources to ensure UI matches actual saved values.
@@ -298,10 +300,10 @@ class _SettingsPageState extends State<SettingsPage> {
                               outsourcingCost != null && outsourcingCost >= 0;
                           return ListTile(
                             leading: CircleAvatar(
-                              backgroundColor: Colors.blue[50],
-                              child: const IconText(
+                              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                              child: IconText(
                                 Icons.checkroom,
-                                color: Colors.blue,
+                                color: Theme.of(context).colorScheme.primary,
                               ),
                             ),
                             title: Text(
@@ -555,10 +557,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   Expanded(
                     child: TextField(
                       controller: priceCtrl,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Price',
-                        prefixText: '\$ ',
-                        border: OutlineInputBorder(),
+                        prefixText: '$_currency ',
+                        border: const OutlineInputBorder(),
                       ),
                       keyboardType: TextInputType.number,
                     ),
@@ -592,11 +594,11 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 12),
               TextField(
                 controller: outsourcingCtrl,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Outsourcing Cost (per item)',
-                  prefixText: '\$ ',
+                  prefixText: '$_currency ',
                   hintText: 'Leave blank if none',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
                 ),
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
@@ -805,7 +807,28 @@ class _SettingsPageState extends State<SettingsPage> {
     final l10n = AppLocalizations.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.settingsTitle), elevation: 0),
+      appBar: AppBar(
+        title: Text(l10n.settingsTitle),
+        elevation: 0,
+        actions: [
+          if (_isSaving)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          else
+            TextButton(
+              onPressed: _saveAllSettings,
+              child: const Text('Save'),
+            ),
+        ],
+      ),
       body: ListView(
         children: [
           _buildSectionHeader(l10n.shopInformation),
@@ -855,33 +878,19 @@ class _SettingsPageState extends State<SettingsPage> {
 
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _orderIdController,
-                    readOnly: true,
-                    decoration: InputDecoration(
-                      labelText: l10n.nextOrderNumber,
-                      prefixIcon: const IconText(Icons.confirmation_number),
-                      border: const OutlineInputBorder(),
-                      helperText: l10n.helperSetStartingId,
-                    ),
-                    keyboardType: TextInputType.number,
-                  ),
+            child: TextField(
+              controller: _orderIdController,
+              readOnly: true,
+              decoration: InputDecoration(
+                labelText: l10n.nextOrderNumber,
+                prefixIcon: const IconText(Icons.confirmation_number),
+                border: const OutlineInputBorder(),
+                helperText: 'Auto-managed by Cloud Functions',
+                suffixIcon: const Tooltip(
+                  message: 'Order ID is automatically assigned by the server',
+                  child: IconText(Icons.info_outline, size: 18),
                 ),
-                const SizedBox(width: 16),
-                ElevatedButton(
-                  onPressed: _updateOrderNumber,
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 16,
-                      horizontal: 24,
-                    ),
-                  ),
-                  child: Text(l10n.updateButton),
-                ),
-              ],
+              ),
             ),
           ),
 
@@ -927,11 +936,32 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildDivider(),
           _buildSectionHeader(l10n.preferencesLabel),
 
+          ListTile(
+            leading: const IconText(Icons.brightness_6_outlined),
+            title: const Text('Theme Mode'),
+            subtitle: const Text('Light, Dark, or follow system'),
+            trailing: DropdownButton<ThemeMode>(
+              value: _themeMode,
+              underline: const SizedBox.shrink(),
+              items: const [
+                DropdownMenuItem(value: ThemeMode.system, child: Text('System')),
+                DropdownMenuItem(value: ThemeMode.light, child: Text('Light')),
+                DropdownMenuItem(value: ThemeMode.dark, child: Text('Dark')),
+              ],
+              onChanged: (mode) {
+                if (mode != null) {
+                  setState(() => _themeMode = mode);
+                  _settingsService.setThemeMode(mode);
+                }
+              },
+            ),
+          ),
+
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Card(
               elevation: 0,
-              color: const Color(0xFF1E1E2C),
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
@@ -973,16 +1003,18 @@ class _SettingsPageState extends State<SettingsPage> {
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: _accentOptions
-                          .map(
-                            (color) => _buildColorOption(
-                              color,
-                              isSelected:
-                                  _accentColor.toARGB32() == color.toARGB32(),
-                              onTap: () => _updateAccentColor(color),
-                            ),
-                          )
-                          .toList(),
+                      children: [
+                        ..._accentOptions.map((color) => _buildColorOption(
+                          color,
+                          isSelected: _accentColor.toARGB32() == color.toARGB32(),
+                          onTap: () => _updateAccentColor(color),
+                        )),
+                        _buildCustomColorOption(
+                          currentColor: _accentColor,
+                          presets: _accentOptions,
+                          onSelect: _updateAccentColor,
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 20),
                     ListTile(
@@ -1009,16 +1041,18 @@ class _SettingsPageState extends State<SettingsPage> {
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: _textColorOptions
-                          .map(
-                            (color) => _buildColorOption(
-                              color,
-                              isSelected:
-                                  _textColor.toARGB32() == color.toARGB32(),
-                              onTap: () => _updateTextColor(color),
-                            ),
-                          )
-                          .toList(),
+                      children: [
+                        ..._textColorOptions.map((color) => _buildColorOption(
+                          color,
+                          isSelected: _textColor.toARGB32() == color.toARGB32(),
+                          onTap: () => _updateTextColor(color),
+                        )),
+                        _buildCustomColorOption(
+                          currentColor: _textColor,
+                          presets: _textColorOptions,
+                          onSelect: _updateTextColor,
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 20),
                     ListTile(
@@ -1042,17 +1076,18 @@ class _SettingsPageState extends State<SettingsPage> {
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: _textColorOptions
-                          .map(
-                            (color) => _buildColorOption(
-                              color,
-                              isSelected:
-                                  _headingTextColor.toARGB32() ==
-                                  color.toARGB32(),
-                              onTap: () => _updateHeadingTextColor(color),
-                            ),
-                          )
-                          .toList(),
+                      children: [
+                        ..._textColorOptions.map((color) => _buildColorOption(
+                          color,
+                          isSelected: _headingTextColor.toARGB32() == color.toARGB32(),
+                          onTap: () => _updateHeadingTextColor(color),
+                        )),
+                        _buildCustomColorOption(
+                          currentColor: _headingTextColor,
+                          presets: _textColorOptions,
+                          onSelect: _updateHeadingTextColor,
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 20),
                     ListTile(
@@ -1079,17 +1114,18 @@ class _SettingsPageState extends State<SettingsPage> {
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: _textColorOptions
-                          .map(
-                            (color) => _buildColorOption(
-                              color,
-                              isSelected:
-                                  _cardTitleColor.toARGB32() ==
-                                  color.toARGB32(),
-                              onTap: () => _updateCardTitleColor(color),
-                            ),
-                          )
-                          .toList(),
+                      children: [
+                        ..._textColorOptions.map((color) => _buildColorOption(
+                          color,
+                          isSelected: _cardTitleColor.toARGB32() == color.toARGB32(),
+                          onTap: () => _updateCardTitleColor(color),
+                        )),
+                        _buildCustomColorOption(
+                          currentColor: _cardTitleColor,
+                          presets: _textColorOptions,
+                          onSelect: _updateCardTitleColor,
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 20),
                     ListTile(
@@ -1113,17 +1149,18 @@ class _SettingsPageState extends State<SettingsPage> {
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: _textColorOptions
-                          .map(
-                            (color) => _buildColorOption(
-                              color,
-                              isSelected:
-                                  _sidebarTextColor.toARGB32() ==
-                                  color.toARGB32(),
-                              onTap: () => _updateSidebarTextColor(color),
-                            ),
-                          )
-                          .toList(),
+                      children: [
+                        ..._textColorOptions.map((color) => _buildColorOption(
+                          color,
+                          isSelected: _sidebarTextColor.toARGB32() == color.toARGB32(),
+                          onTap: () => _updateSidebarTextColor(color),
+                        )),
+                        _buildCustomColorOption(
+                          currentColor: _sidebarTextColor,
+                          presets: _textColorOptions,
+                          onSelect: _updateSidebarTextColor,
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -1228,13 +1265,30 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildDivider(),
           _buildSectionHeader(l10n.accountLabel),
 
+          // 目前登入帳號
+          ListTile(
+            leading: const IconText(Icons.person_outline),
+            title: const Text('目前登入帳號'),
+            subtitle: Text(
+              FirebaseAuth.instance.currentUser?.email ?? '—',
+              style: TextStyle(color: Theme.of(context).colorScheme.primary),
+            ),
+          ),
+
+          // 員工帳號管理
+          ListTile(
+            leading: const IconText(Icons.manage_accounts_outlined),
+            title: const Text('員工帳號管理'),
+            subtitle: const Text('新增員工帳號或重設員工密碼'),
+            trailing: const IconText(Icons.chevron_right),
+            onTap: () => _showStaffAccountDialog(context),
+          ),
+
           ListTile(
             leading: const IconText(Icons.logout, color: Colors.red),
             title: Text(l10n.logout, style: const TextStyle(color: Colors.red)),
             onTap: () async {
-              // 執行登出
               await FirebaseAuth.instance.signOut();
-              // AuthWrapper 會自動偵測到登出，並將畫面切換回 LoginPage
             },
           ),
 
@@ -1268,8 +1322,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        foregroundColor: Colors.white,
+                        backgroundColor: Theme.of(ctx).colorScheme.tertiary,
+                        foregroundColor: Theme.of(ctx).colorScheme.onTertiary,
                       ),
                       onPressed: () => Navigator.pop(ctx, true),
                       child: const Text('確認清除'),
@@ -1320,23 +1374,6 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
 
           const SizedBox(height: 40),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: ElevatedButton(
-              onPressed: _isSaving ? null : _saveAllSettings,
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-              ),
-              child: _isSaving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Save Changes'),
-            ),
-          ),
-          const SizedBox(height: 40),
         ],
       ),
     );
@@ -1348,7 +1385,7 @@ class _SettingsPageState extends State<SettingsPage> {
       child: Text(
         title.toUpperCase(),
         style: TextStyle(
-          color: Theme.of(context).primaryColor,
+          color: Theme.of(context).colorScheme.primary,
           fontWeight: FontWeight.bold,
           fontSize: 14,
         ),
@@ -1391,5 +1428,331 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // 自訂色票圓圈：若當前色不在 presets 中則顯示該色並標記選中；否則顯示彩虹漸層
+  Widget _buildCustomColorOption({
+    required Color currentColor,
+    required List<Color> presets,
+    required void Function(Color) onSelect,
+  }) {
+    final isCustom = !presets.any((c) => c.toARGB32() == currentColor.toARGB32());
+    return GestureDetector(
+      onTap: () => _showColorPickerDialog(context, currentColor, onSelect),
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: isCustom
+              ? null
+              : const SweepGradient(colors: [
+                  Color(0xFFEF5350),
+                  Color(0xFFFFEE58),
+                  Color(0xFF66BB6A),
+                  Color(0xFF42A5F5),
+                  Color(0xFFCE93D8),
+                  Color(0xFFEF5350),
+                ]),
+          color: isCustom ? currentColor : null,
+          border: Border.all(
+            color: isCustom ? Colors.white : Colors.transparent,
+            width: 3,
+          ),
+          boxShadow: [
+            if (isCustom)
+              BoxShadow(
+                color: currentColor.withValues(alpha: 0.5),
+                blurRadius: 8,
+                spreadRadius: 2,
+              ),
+          ],
+        ),
+        child: Icon(
+          isCustom ? Icons.palette : Icons.add,
+          size: 18,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
+  void _showColorPickerDialog(
+    BuildContext context,
+    Color currentColor,
+    void Function(Color) onSelected,
+  ) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Choose Color'),
+        content: SizedBox(
+          width: 280,
+          child: GridView.builder(
+            shrinkWrap: true,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 6,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+            ),
+            itemCount: _colorPalette.length,
+            itemBuilder: (_, i) {
+              final c = _colorPalette[i];
+              final isSelected = c.toARGB32() == currentColor.toARGB32();
+              return GestureDetector(
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onSelected(c);
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: c,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isSelected
+                          ? Theme.of(context).colorScheme.primary
+                          : c == Colors.white
+                              ? Colors.grey.shade400
+                              : Colors.transparent,
+                      width: isSelected ? 3 : 1,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDivider() => const Divider(height: 32, thickness: 1);
+
+  // === 員工帳號管理 ===
+  Future<void> _showStaffAccountDialog(BuildContext context) async {
+    final cs = Theme.of(context).colorScheme;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => _StaffAccountDialog(cs: cs),
+    );
+  }
+}
+
+// === 員工帳號管理對話框 ===
+class _StaffAccountDialog extends StatefulWidget {
+  const _StaffAccountDialog({required this.cs});
+  final ColorScheme cs;
+
+  @override
+  State<_StaffAccountDialog> createState() => _StaffAccountDialogState();
+}
+
+class _StaffAccountDialogState extends State<_StaffAccountDialog> {
+  final _emailCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  bool _busy = false;
+  String? _msg;
+  bool _isError = false;
+  bool _showPass = false;
+  // 0 = 新增帳號, 1 = 重設密碼
+  int _tab = 0;
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _createAccount() async {
+    final email = _emailCtrl.text.trim();
+    final pass = _passCtrl.text.trim();
+    if (email.isEmpty || pass.isEmpty) {
+      _setMsg('請填寫電郵和密碼', isError: true);
+      return;
+    }
+    if (pass.length < 6) {
+      _setMsg('密碼最少 6 個字元', isError: true);
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await DatabaseService().createStaffAccount(email: email, password: pass);
+      if (mounted) {
+        _setMsg('帳號 $email 已建立成功', isError: false);
+        _emailCtrl.clear();
+        _passCtrl.clear();
+      }
+    } on StaffAccountException catch (e) {
+      String msg;
+      switch (e.code) {
+        case 'email-already-in-use':
+          msg = '此電郵已有帳號';
+          break;
+        case 'invalid-email':
+          msg = '電郵格式不正確';
+          break;
+        case 'weak-password':
+          msg = '密碼強度不足（最少 6 字元）';
+          break;
+        default:
+          msg = '建立失敗：${e.message}';
+      }
+      if (mounted) _setMsg(msg, isError: true);
+    } catch (e) {
+      if (mounted) _setMsg('建立失敗：$e', isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _resetPassword() async {
+    final email = _emailCtrl.text.trim();
+    if (email.isEmpty) {
+      _setMsg('請輸入電郵', isError: true);
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (mounted) {
+        _setMsg('重設密碼連結已發送至 $email', isError: false);
+        _emailCtrl.clear();
+      }
+    } on FirebaseAuthException catch (e) {
+      if (mounted) _setMsg('發送失敗：${e.message}', isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _setMsg(String msg, {required bool isError}) {
+    setState(() {
+      _msg = msg;
+      _isError = isError;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = widget.cs;
+    return AlertDialog(
+      title: const Text('員工帳號管理'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Tab 切換
+            SegmentedButton<int>(
+              segments: const [
+                ButtonSegment(value: 0, label: Text('新增帳號'), icon: Icon(Icons.person_add_outlined)),
+                ButtonSegment(value: 1, label: Text('重設密碼'), icon: Icon(Icons.lock_reset_outlined)),
+              ],
+              selected: {_tab},
+              onSelectionChanged: (s) => setState(() {
+                _tab = s.first;
+                _msg = null;
+                _emailCtrl.clear();
+                _passCtrl.clear();
+              }),
+            ),
+            const SizedBox(height: 16),
+            // 訊息框
+            if (_msg != null)
+              Container(
+                padding: const EdgeInsets.all(10),
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: _isError
+                      ? cs.errorContainer
+                      : cs.tertiaryContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _isError ? Icons.error_outline : Icons.check_circle_outline,
+                      size: 16,
+                      color: _isError ? cs.onErrorContainer : cs.onTertiaryContainer,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _msg!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _isError ? cs.onErrorContainer : cs.onTertiaryContainer,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            // 電郵
+            TextField(
+              controller: _emailCtrl,
+              decoration: const InputDecoration(
+                labelText: '員工電郵',
+                prefixIcon: Icon(Icons.email_outlined),
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              keyboardType: TextInputType.emailAddress,
+            ),
+            // 密碼（只有新增帳號時顯示）
+            if (_tab == 0) ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: _passCtrl,
+                obscureText: !_showPass,
+                decoration: InputDecoration(
+                  labelText: '初始密碼（最少 6 字元）',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    icon: Icon(_showPass ? Icons.visibility_off : Icons.visibility),
+                    onPressed: () => setState(() => _showPass = !_showPass),
+                  ),
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '建立後員工可透過「忘記密碼」自行更改。',
+                style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+              ),
+            ] else ...[
+              const SizedBox(height: 6),
+              Text(
+                '系統將發送密碼重設電郵，員工可自行設定新密碼。',
+                style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('關閉'),
+        ),
+        FilledButton(
+          onPressed: _busy
+              ? null
+              : () => _tab == 0 ? _createAccount() : _resetPassword(),
+          child: _busy
+              ? const SizedBox(
+                  width: 16, height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : Text(_tab == 0 ? '建立帳號' : '發送連結'),
+        ),
+      ],
+    );
+  }
 }

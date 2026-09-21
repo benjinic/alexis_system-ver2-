@@ -4,8 +4,13 @@ import '../l10n/app_localizations.dart';
 
 class Navigation extends StatelessWidget {
   final String currentRoute;
+  final int urgentCount;
 
-  const Navigation({super.key, required this.currentRoute});
+  const Navigation({
+    super.key,
+    required this.currentRoute,
+    this.urgentCount = 0,
+  });
 
   void onDestinationSelected(BuildContext context, int index) {
     switch (index) {
@@ -74,8 +79,16 @@ class Navigation extends StatelessWidget {
         ),
         // 6. Workshop (工廠) -> 工坊製作
         NavigationRailDestination(
-          icon: const IconText(Icons.engineering_outlined),
-          selectedIcon: const IconText(Icons.engineering),
+          icon: Badge(
+            isLabelVisible: urgentCount > 0,
+            label: Text(urgentCount > 9 ? '9+' : '$urgentCount'),
+            child: const IconText(Icons.engineering_outlined),
+          ),
+          selectedIcon: Badge(
+            isLabelVisible: urgentCount > 0,
+            label: Text(urgentCount > 9 ? '9+' : '$urgentCount'),
+            child: const IconText(Icons.engineering),
+          ),
           label: Text(l10n.navShop),
         ),
         // 7. Settings (設定) -> 標準設定

@@ -32,11 +32,11 @@ class StatCard extends StatelessWidget {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: backgroundColor ?? Colors.white,
+          color: backgroundColor ?? Theme.of(context).colorScheme.surfaceContainerLow,
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.1),
+              color: Colors.black.withValues(alpha: 0.08),
               blurRadius: 8,
               offset: const Offset(0, 4),
             ),
@@ -52,14 +52,14 @@ class StatCard extends StatelessWidget {
               children: [
                 IconText(
                   icon,
-                  color: textColor ?? Theme.of(context).primaryColor,
+                  color: textColor ?? Theme.of(context).colorScheme.primary,
                   size: 28,
                 ),
                 if (trendUp)
                   IconText(
                     Icons.trending_up,
-                    color:
-                        textColor?.withValues(alpha: 0.6) ?? Colors.green[400],
+                    color: textColor?.withValues(alpha: 0.6) ??
+                        Theme.of(context).colorScheme.tertiary,
                     size: 20,
                   ),
               ],
@@ -70,7 +70,8 @@ class StatCard extends StatelessWidget {
               style: TextStyle(
                 fontWeight: FontWeight.w600,
                 fontSize: 14,
-                color: textColor?.withValues(alpha: 0.7) ?? Colors.grey[700],
+                color: textColor?.withValues(alpha: 0.7) ??
+                    Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 4),
@@ -79,7 +80,7 @@ class StatCard extends StatelessWidget {
               style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
-                color: textColor ?? Colors.black,
+                color: textColor ?? Theme.of(context).colorScheme.onSurface,
               ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
@@ -88,7 +89,8 @@ class StatCard extends StatelessWidget {
             Text(
               trend,
               style: TextStyle(
-                color: textColor?.withValues(alpha: 0.6) ?? Colors.grey[600],
+                color: textColor?.withValues(alpha: 0.6) ??
+                    Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 12,
               ),
             ),

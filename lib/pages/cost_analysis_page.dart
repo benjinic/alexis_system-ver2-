@@ -5,9 +5,10 @@ import '../models/order.dart';
 import '../models/service_item.dart';
 import '../services/database_service.dart';
 import '../services/cost_calculation_service.dart';
+import '../services/settings_service.dart';
 import 'pos_page.dart';
 
-// ─── Shared accent colours ────────────────────────────────────────
+// ─── Chart / data accent colours (intentional fixed values) ──────────────────
 const Color _accentRevenue = Color(0xFF3B82F6);
 const Color _accentProfit = Color(0xFF10B981);
 const Color _accentCost = Color(0xFFEF4444);
@@ -16,9 +17,19 @@ const Color _accentOutsource = Color(0xFF8B5CF6);
 const Color _accentFixed = Color(0xFF6B7280);
 
 final _fmtCurrency = NumberFormat('#,##0', 'zh_HK');
-String _fmtHKD(double v) => 'HK\$ ${_fmtCurrency.format(v.abs())}';
+String _currencySymbol = 'HK\$';
+String _fmtHKD(double v) => '$_currencySymbol ${_fmtCurrency.format(v.abs())}';
 
-// ─── Page ─────────────────────────────────────────────────────────
+String _codeToSymbol(String code) => switch (code) {
+  'USD' => 'US\$',
+  'HKD' => 'HK\$',
+  'TWD' => 'NT\$',
+  'EUR' => '€',
+  'GBP' => '£',
+  _ => code,
+};
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 class CostAnalysisPage extends StatefulWidget {
   const CostAnalysisPage({super.key});
@@ -32,10 +43,13 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
   String _timeFilter = 'Month';
   Map<String, ServiceItem> _serviceByName = {};
 
-  // Filtering state
   String? _customerFilter;
   DateTimeRange? _customDateRange;
   final TextEditingController _customerSearchCtrl = TextEditingController();
+
+  // Sort state for order breakdown
+  String _sortBy = 'date'; // 'date' | 'margin' | 'revenue'
+  bool _sortDesc = true;
 
   @override
   void initState() {
@@ -46,6 +60,10 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
           _serviceByName = {for (final s in services) s.name: s};
         });
       }
+    });
+    SettingsService().loadSettings().then((s) {
+      final symbol = _codeToSymbol(s['currency'] as String? ?? 'HKD');
+      if (mounted) setState(() => _currencySymbol = symbol);
     });
   }
 
@@ -63,6 +81,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
       materialCost: order.materialCost,
       outsourcingCost: order.outsourcingCost,
       fixedCost: order.fixedCost,
+      laborCost: order.laborCost,
     );
   }
 
@@ -79,15 +98,11 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
       final fetchedItems = await _dbService.getOrderItems(order.id);
       final Order fullOrder;
       if (fetchedItems.isNotEmpty) {
-        // Items from order_items collection: stored price is the original
-        // selling price — preserve it by marking all as manualUnitPrice.
         final editItems = fetchedItems
             .map((item) => item.copyWith(manualUnitPrice: true))
             .toList();
         fullOrder = order.copyWith(items: editItems);
       } else {
-        // Legacy inline items: price field may be unreliable, sync against
-        // current service catalogue to get the correct selling price.
         final serviceByName = _serviceByName.isNotEmpty
             ? _serviceByName
             : {
@@ -109,7 +124,10 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
       if (!ctx.mounted) return;
       Navigator.pop(ctx);
       ScaffoldMessenger.of(ctx).showSnackBar(
-        SnackBar(content: Text('載入訂單失敗: $e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('載入訂單失敗: $e'),
+          backgroundColor: Theme.of(ctx).colorScheme.error,
+        ),
       );
     }
   }
@@ -121,7 +139,9 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
       final date = order.createdAt!;
       if (_customDateRange != null) {
         return !date.isBefore(_customDateRange!.start) &&
-            !date.isAfter(_customDateRange!.end.add(const Duration(days: 1)));
+            !date.isAfter(
+              _customDateRange!.end.add(const Duration(days: 1)),
+            );
       }
       switch (_timeFilter) {
         case 'Week':
@@ -132,6 +152,28 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
           return date.year == now.year;
         default:
           return true;
+      }
+    }).toList();
+  }
+
+  // Orders from the period immediately before the current filter period
+  List<Order> _filterOrdersByLastPeriod(List<Order> orders) {
+    if (_customDateRange != null || _timeFilter == 'All') return [];
+    final now = DateTime.now();
+    return orders.where((order) {
+      if (order.createdAt == null) return false;
+      final date = order.createdAt!;
+      switch (_timeFilter) {
+        case 'Week':
+          final diff = now.difference(date).inDays;
+          return diff > 7 && diff <= 14;
+        case 'Month':
+          final lastMonth = DateTime(now.year, now.month - 1);
+          return date.year == lastMonth.year && date.month == lastMonth.month;
+        case 'Year':
+          return date.year == now.year - 1;
+        default:
+          return false;
       }
     }).toList();
   }
@@ -234,7 +276,8 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
           FilledButton(
             onPressed: () {
               setState(
-                () => _customerFilter = _customerSearchCtrl.text.trim().isEmpty
+                () => _customerFilter =
+                    _customerSearchCtrl.text.trim().isEmpty
                     ? null
                     : _customerSearchCtrl.text.trim(),
               );
@@ -247,22 +290,28 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
     );
   }
 
+  // % change vs last period; null when last == 0
+  double? _trendPct(double current, double last) {
+    if (last == 0) return null;
+    return (current - last) / last.abs() * 100;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: const Text(
           'Cost & Profit',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
+        backgroundColor: cs.surface,
+        foregroundColor: cs.onSurface,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Divider(height: 1, color: Colors.grey[200]),
+          child: Divider(height: 1, color: cs.outlineVariant),
         ),
         actions: const [],
       ),
@@ -282,34 +331,62 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
             final filteredOrders = _applyCustomerFilter(dateFiltered);
             final monthlyData = _buildMonthlyData(allOrders);
 
+            // Current period metrics
             double totalRevenue = 0, totalMaterialCost = 0;
             double totalOutsourcingCost = 0, totalFixedCost = 0, totalCost = 0;
-            int orderCount = 0;
+            int orderCount = 0, lossCount = 0;
+            double totalLoss = 0;
 
             for (final o in filteredOrders) {
               if (o.status == 'cancelled') continue;
               orderCount++;
-              totalRevenue += _resolveRevenue(o);
+              final rev = _resolveRevenue(o);
+              final cost = _resolveTotalCost(o);
+              totalRevenue += rev;
               totalMaterialCost += o.materialCost;
               totalOutsourcingCost += _resolveOutsourcingCost(o);
               totalFixedCost += o.fixedCost;
-              totalCost += _resolveTotalCost(o);
+              totalCost += cost;
+              if (rev - cost < 0) {
+                lossCount++;
+                totalLoss += cost - rev;
+              }
             }
 
             final totalProfit = totalRevenue - totalCost;
             final margin = totalRevenue > 0
                 ? (totalProfit / totalRevenue) * 100
                 : 0.0;
-            final avgOrderValue = orderCount > 0
-                ? totalRevenue / orderCount
-                : 0.0;
+            final avgOrderValue =
+                orderCount > 0 ? totalRevenue / orderCount : 0.0;
+
+            // Last period metrics for trend comparison
+            final lastPeriodOrders = _applyCustomerFilter(
+              _filterOrdersByLastPeriod(allOrders),
+            ).where((o) => o.status != 'cancelled').toList();
+
+            double lastRevenue = 0, lastCost = 0, lastMaterial = 0;
+            double lastOutsource = 0, lastFixed = 0;
+            int lastCount = 0;
+            for (final o in lastPeriodOrders) {
+              lastRevenue += _resolveRevenue(o);
+              lastCost += _resolveTotalCost(o);
+              lastMaterial += o.materialCost;
+              lastOutsource += _resolveOutsourcingCost(o);
+              lastFixed += o.fixedCost;
+              lastCount++;
+            }
+            final lastProfit = lastRevenue - lastCost;
+            final lastMargin =
+                lastRevenue > 0 ? (lastProfit / lastRevenue) * 100 : 0.0;
+            final lastAvg = lastCount > 0 ? lastRevenue / lastCount : 0.0;
+            final hasTrend = lastPeriodOrders.isNotEmpty;
 
             return SingleChildScrollView(
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── Visible filter bar ───────────────────────────────
                   _FilterBar(
                     timeFilter: _timeFilter,
                     customDateRange: _customDateRange,
@@ -342,7 +419,30 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                     outsourceCost: totalOutsourcingCost,
                     fixedCost: totalFixedCost,
                     avgOrderValue: avgOrderValue,
+                    revenueTrend:
+                        hasTrend ? _trendPct(totalRevenue, lastRevenue) : null,
+                    profitTrend:
+                        hasTrend ? _trendPct(totalProfit, lastProfit) : null,
+                    costTrend:
+                        hasTrend ? _trendPct(totalCost, lastCost) : null,
+                    marginTrend: hasTrend ? (margin - lastMargin) : null,
+                    materialTrend:
+                        hasTrend
+                        ? _trendPct(totalMaterialCost, lastMaterial)
+                        : null,
+                    outsourceTrend:
+                        hasTrend
+                        ? _trendPct(totalOutsourcingCost, lastOutsource)
+                        : null,
+                    fixedTrend:
+                        hasTrend ? _trendPct(totalFixedCost, lastFixed) : null,
+                    avgTrend:
+                        hasTrend ? _trendPct(avgOrderValue, lastAvg) : null,
                   ),
+                  if (lossCount > 0) ...[
+                    const SizedBox(height: 12),
+                    _LossAlert(lossCount: lossCount, totalLoss: totalLoss),
+                  ],
                   const SizedBox(height: 28),
                   const _SectionHeader(label: '6 個月趨勢'),
                   const SizedBox(height: 12),
@@ -358,14 +458,26 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                   const SizedBox(height: 28),
                   _SectionHeader(
                     label: '訂單明細',
-                    sub:
-                        (_customerFilter != null && _customerFilter!.isNotEmpty)
+                    sub: (_customerFilter != null &&
+                            _customerFilter!.isNotEmpty)
                         ? '篩選: $_customerFilter'
                         : null,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
+                  _SortBar(
+                    sortBy: _sortBy,
+                    sortDesc: _sortDesc,
+                    onSort: (by, desc) =>
+                        setState(() {
+                          _sortBy = by;
+                          _sortDesc = desc;
+                        }),
+                  ),
+                  const SizedBox(height: 8),
                   _OrderBreakdownList(
                     orders: filteredOrders,
+                    sortBy: _sortBy,
+                    sortDesc: _sortDesc,
                     resolveRevenue: _resolveRevenue,
                     resolveOutsourcing: _resolveOutsourcingCost,
                     resolveTotalCost: _resolveTotalCost,
@@ -377,16 +489,13 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
             );
           },
         ),
-      ), // Builder
+      ),
     );
   }
 
   void _showCostDetailDialog(BuildContext context, Order order) {
-    // Preserve the exact Firebase values to avoid rounding drift.
     final initialMaterialCost = order.materialCost;
     final initialOutsourcingCost = order.outsourcingCost;
-    // Use Firebase-stored totalCost as the base; fall back to formula only
-    // when the order pre-dates the field being populated.
     final initialTotalCost = order.totalCost > 0
         ? order.totalCost
         : CostCalculationService.calculateTotalCost(
@@ -396,7 +505,9 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
           );
 
     String fmtInput(double v) =>
-        v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+        v == v.truncateToDouble()
+        ? v.toStringAsFixed(0)
+        : v.toStringAsFixed(2);
 
     final materialCtrl = TextEditingController(
       text: fmtInput(order.materialCost),
@@ -411,13 +522,12 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
+          final cs = Theme.of(ctx).colorScheme;
           final dialogRevenue = order.total;
           final materialCost =
               double.tryParse(materialCtrl.text) ?? initialMaterialCost;
           final outsourcingCost =
               double.tryParse(outsourcingCtrl.text) ?? initialOutsourcingCost;
-          // Adjust from Firebase base so any embedded labor/other costs are
-          // preserved and only the user-edited delta is applied.
           final dialogTotalCost =
               initialTotalCost +
               (materialCost - initialMaterialCost) +
@@ -455,7 +565,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
               constraints: const BoxConstraints(maxWidth: 820),
               child: Container(
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: cs.surface,
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(
@@ -468,7 +578,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // ── Header bar ─────────────────────────────
+                    // Header — intentional dark banner
                     Container(
                       padding: const EdgeInsets.fromLTRB(24, 20, 16, 20),
                       decoration: const BoxDecoration(
@@ -548,8 +658,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                         ],
                       ),
                     ),
-
-                    // ── Body ───────────────────────────────────
+                    // Body
                     Flexible(
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.all(24),
@@ -557,6 +666,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                           builder: (_, constraints) {
                             final wide = constraints.maxWidth > 500;
                             final left = _buildDialogLeft(
+                              ctx,
                               order,
                               dialogRevenue,
                               dialogProfit,
@@ -567,6 +677,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                               outsourcingCost,
                             );
                             final right = _buildDialogRight(
+                              ctx,
                               materialCtrl,
                               outsourcingCtrl,
                               setDialogState,
@@ -599,13 +710,12 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                         ),
                       ),
                     ),
-
-                    // ── Footer ─────────────────────────────────
+                    // Footer
                     Container(
                       padding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
                       decoration: BoxDecoration(
                         border: Border(
-                          top: BorderSide(color: Colors.grey.shade100),
+                          top: BorderSide(color: cs.outlineVariant),
                         ),
                       ),
                       child: Row(
@@ -643,26 +753,29 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                                         newMaterial < 0 ||
                                         newOutsource < 0) {
                                       messenger.showSnackBar(
-                                        const SnackBar(
-                                          content: Text('請輸入有效的成本數值（不可為負數）'),
-                                          backgroundColor: Colors.red,
+                                        SnackBar(
+                                          content: const Text(
+                                            '請輸入有效的成本數值（不可為負數）',
+                                          ),
+                                          backgroundColor: cs.error,
                                         ),
                                       );
                                       return;
                                     }
                                     setDialogState(() => isSaving = true);
                                     try {
-                                      await _dbService.updateOrderCostBreakdown(
-                                        orderId: order.id,
-                                        materialCost: newMaterial,
-                                        outsourcingCost: newOutsource,
-                                      );
+                                      await _dbService
+                                          .updateOrderCostBreakdown(
+                                            orderId: order.id,
+                                            materialCost: newMaterial,
+                                            outsourcingCost: newOutsource,
+                                          );
                                       if (!ctx.mounted) return;
                                       Navigator.pop(ctx);
                                       messenger.showSnackBar(
-                                        const SnackBar(
-                                          content: Text('成本資料已更新'),
-                                          backgroundColor: Colors.green,
+                                        SnackBar(
+                                          content: const Text('成本資料已更新'),
+                                          backgroundColor: cs.tertiary,
                                         ),
                                       );
                                     } catch (e) {
@@ -670,7 +783,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                                       messenger.showSnackBar(
                                         SnackBar(
                                           content: Text('更新失敗: $e'),
-                                          backgroundColor: Colors.red,
+                                          backgroundColor: cs.error,
                                         ),
                                       );
                                     } finally {
@@ -712,6 +825,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
   }
 
   Widget _buildDialogLeft(
+    BuildContext context,
     Order order,
     double revenue,
     double profit,
@@ -721,6 +835,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
     double materialCost,
     double outsourcingCost,
   ) {
+    final cs = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -745,7 +860,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                 '淨利潤',
                 style: TextStyle(
                   fontSize: 12,
-                  color: Colors.grey[500],
+                  color: cs.onSurfaceVariant,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -797,7 +912,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
           label: '付款方式',
           value: order.paymentMethod,
           icon: Icons.credit_card_outlined,
-          color: Colors.grey,
+          color: cs.outline,
         ),
         if (order.deliveryDate != null) ...[
           const SizedBox(height: 8),
@@ -805,7 +920,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
             label: '交貨日期',
             value: DateFormat('yyyy-MM-dd').format(order.deliveryDate!),
             icon: Icons.event_outlined,
-            color: Colors.grey,
+            color: cs.outline,
           ),
         ],
         if (order.itemSummary.isNotEmpty) ...[
@@ -814,7 +929,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
             label: '項目',
             value: order.itemSummary,
             icon: Icons.list_alt_outlined,
-            color: Colors.grey,
+            color: cs.outline,
           ),
         ],
       ],
@@ -822,6 +937,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
   }
 
   Widget _buildDialogRight(
+    BuildContext context,
     TextEditingController materialCtrl,
     TextEditingController outsourcingCtrl,
     StateSetter setDialogState,
@@ -833,9 +949,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
     bool isProfitable,
     double totalCost,
   ) {
-    // Any cost embedded in Firebase totalCost that isn't materialCost /
-    // outsourcingCost / fixedCost (e.g. legacy laborCost, rounding) is shown
-    // as an "其他成本" row so the breakdown always sums to totalCost.
+    final cs = Theme.of(context).colorScheme;
     final knownCost = materialCost + outsourcingCost + order.fixedCost;
     final otherCost = totalCost - knownCost;
     final showOther = otherCost.abs() > 0.01;
@@ -848,7 +962,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: Colors.grey[700],
+            color: cs.onSurface,
           ),
         ),
         const SizedBox(height: 10),
@@ -871,9 +985,9 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
+            color: cs.surfaceContainerLowest,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.shade200),
+            border: Border.all(color: cs.outlineVariant),
           ),
           child: Column(
             children: [
@@ -883,7 +997,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                 color: _accentRevenue,
                 bold: true,
               ),
-              Divider(height: 16, color: Colors.grey.shade200),
+              Divider(height: 16, color: cs.outlineVariant),
               _BreakdownRow(
                 label: '物料成本',
                 amount: -materialCost,
@@ -909,11 +1023,11 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                 _BreakdownRow(
                   label: '其他成本',
                   amount: -otherCost,
-                  color: Colors.grey,
+                  color: cs.outline,
                   sub: '工資 / 其他',
                 ),
               ],
-              Divider(height: 16, color: Colors.grey.shade200),
+              Divider(height: 16, color: cs.outlineVariant),
               _BreakdownRow(
                 label: '淨利潤',
                 amount: profit,
@@ -928,7 +1042,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
   }
 }
 
-// ─── Dialog helper widgets ────────────────────────────────────────
+// ─── Dialog helper widgets ─────────────────────────────────────────────────────
 
 class _InfoTile extends StatelessWidget {
   const _InfoTile({
@@ -944,12 +1058,13 @@ class _InfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.grey.shade50,
+        color: cs.surfaceContainerLow,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Row(
         children: [
@@ -971,15 +1086,16 @@ class _InfoTile extends StatelessWidget {
                   label,
                   style: TextStyle(
                     fontSize: 10,
-                    color: Colors.grey[500],
+                    color: cs.onSurfaceVariant,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
                 Text(
                   value,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
+                    color: cs.onSurface,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1008,28 +1124,30 @@ class _CostInputField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return TextField(
       controller: controller,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       onChanged: (_) => onChanged(),
+      style: TextStyle(color: cs.onSurface),
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon, size: 18, color: color),
-        prefixText: 'HK\$ ',
+        prefixText: '$_currencySymbol ',
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey.shade300),
+          borderSide: BorderSide(color: cs.outline),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey.shade300),
+          borderSide: BorderSide(color: cs.outline),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: color, width: 1.5),
         ),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: cs.surfaceContainerLow,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
           vertical: 12,
@@ -1055,6 +1173,7 @@ class _BreakdownRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Row(
       children: [
         Container(
@@ -1075,13 +1194,13 @@ class _BreakdownRow extends StatelessWidget {
                 style: TextStyle(
                   fontSize: bold ? 13 : 12,
                   fontWeight: bold ? FontWeight.bold : FontWeight.w500,
-                  color: Colors.grey[800],
+                  color: cs.onSurface,
                 ),
               ),
               if (sub != null)
                 Text(
                   sub!,
-                  style: TextStyle(fontSize: 10, color: Colors.grey[400]),
+                  style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant),
                 ),
             ],
           ),
@@ -1099,7 +1218,7 @@ class _BreakdownRow extends StatelessWidget {
   }
 }
 
-// ─── Section header ───────────────────────────────────────────────
+// ─── Section header ────────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({required this.label, this.sub});
@@ -1108,26 +1227,159 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Row(
       children: [
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 17,
             fontWeight: FontWeight.bold,
-            color: Colors.black87,
+            color: cs.onSurface,
           ),
         ),
         if (sub != null) ...[
           const SizedBox(width: 8),
-          Text(sub!, style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+          Text(
+            sub!,
+            style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+          ),
         ],
       ],
     );
   }
 }
 
-// ─── Visible filter bar (always shown at top of page) ────────────
+// ─── Sort bar ─────────────────────────────────────────────────────────────────
+
+class _SortBar extends StatelessWidget {
+  const _SortBar({
+    required this.sortBy,
+    required this.sortDesc,
+    required this.onSort,
+  });
+  final String sortBy;
+  final bool sortDesc;
+  final void Function(String by, bool desc) onSort;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    const options = [('date', '日期'), ('margin', '利潤率'), ('revenue', '收入')];
+    return Row(
+      children: [
+        Text(
+          '排序：',
+          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+        ),
+        const SizedBox(width: 6),
+        ...options.map((opt) {
+          final (id, label) = opt;
+          final selected = sortBy == id;
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: GestureDetector(
+              onTap: () =>
+                  selected ? onSort(id, !sortDesc) : onSort(id, true),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? cs.primaryContainer
+                      : cs.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: selected ? cs.primary : cs.outlineVariant,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: selected
+                            ? cs.onPrimaryContainer
+                            : cs.onSurfaceVariant,
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                      ),
+                    ),
+                    if (selected) ...[
+                      const SizedBox(width: 3),
+                      Icon(
+                        sortDesc
+                            ? Icons.arrow_downward
+                            : Icons.arrow_upward,
+                        size: 11,
+                        color: cs.onPrimaryContainer,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+}
+
+// ─── Loss alert banner ────────────────────────────────────────────────────────
+
+class _LossAlert extends StatelessWidget {
+  const _LossAlert({required this.lossCount, required this.totalLoss});
+  final int lossCount;
+  final double totalLoss;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: cs.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            color: cs.onErrorContainer,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '$lossCount 筆訂單虧損',
+              style: TextStyle(
+                color: cs.onErrorContainer,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
+          ),
+          Text(
+            '合計虧損 ${_fmtHKD(totalLoss)}',
+            style: TextStyle(
+              color: cs.onErrorContainer,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Filter bar ───────────────────────────────────────────────────────────────
 
 class _FilterBar extends StatelessWidget {
   const _FilterBar({
@@ -1152,12 +1404,13 @@ class _FilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final fmt = DateFormat('MM/dd');
     final bool hasDateFilter = customDateRange != null;
     final bool hasCustomerFilter =
         customerFilter != null && customerFilter!.isNotEmpty;
 
-    final periods = [
+    const periods = [
       ('Week', '本週'),
       ('Month', '本月'),
       ('Year', '本年'),
@@ -1167,9 +1420,9 @@ class _FilterBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cs.surfaceContainerLow,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: cs.outlineVariant),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -1181,25 +1434,23 @@ class _FilterBar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Row 1: period chips + action buttons
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.filter_list_rounded,
                 size: 18,
-                color: Colors.grey,
+                color: cs.onSurfaceVariant,
               ),
               const SizedBox(width: 8),
-              const Text(
+              Text(
                 '篩選：',
                 style: TextStyle(
                   fontSize: 13,
-                  color: Colors.grey,
+                  color: cs.onSurfaceVariant,
                   fontWeight: FontWeight.w500,
                 ),
               ),
               const SizedBox(width: 4),
-              // Period chips
               Expanded(
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -1214,9 +1465,7 @@ class _FilterBar extends StatelessWidget {
                           onSelected: (_) => onTimeFilterChanged(p.$1),
                           selectedColor: _accentRevenue.withValues(alpha: 0.15),
                           labelStyle: TextStyle(
-                            color: isSelected
-                                ? _accentRevenue
-                                : Colors.grey[700],
+                            color: isSelected ? _accentRevenue : cs.onSurface,
                             fontWeight: isSelected
                                 ? FontWeight.w600
                                 : FontWeight.normal,
@@ -1225,7 +1474,7 @@ class _FilterBar extends StatelessWidget {
                           side: BorderSide(
                             color: isSelected
                                 ? _accentRevenue
-                                : Colors.grey.shade300,
+                                : cs.outlineVariant,
                           ),
                           showCheckmark: false,
                         ),
@@ -1234,14 +1483,13 @@ class _FilterBar extends StatelessWidget {
                   ),
                 ),
               ),
-              // Date range button
               const SizedBox(width: 8),
               OutlinedButton.icon(
                 onPressed: onPickDateRange,
                 icon: Icon(
                   Icons.date_range_outlined,
                   size: 16,
-                  color: hasDateFilter ? _accentRevenue : Colors.grey[600],
+                  color: hasDateFilter ? _accentRevenue : cs.onSurfaceVariant,
                 ),
                 label: Text(
                   hasDateFilter
@@ -1249,7 +1497,7 @@ class _FilterBar extends StatelessWidget {
                       : '日期範圍',
                   style: TextStyle(
                     fontSize: 13,
-                    color: hasDateFilter ? _accentRevenue : Colors.grey[700],
+                    color: hasDateFilter ? _accentRevenue : cs.onSurface,
                     fontWeight: hasDateFilter
                         ? FontWeight.w600
                         : FontWeight.normal,
@@ -1261,9 +1509,7 @@ class _FilterBar extends StatelessWidget {
                     vertical: 8,
                   ),
                   side: BorderSide(
-                    color: hasDateFilter
-                        ? _accentRevenue
-                        : Colors.grey.shade300,
+                    color: hasDateFilter ? _accentRevenue : cs.outlineVariant,
                   ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -1271,21 +1517,20 @@ class _FilterBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              // Customer filter button
               OutlinedButton.icon(
                 onPressed: onSearchCustomer,
                 icon: Icon(
                   Icons.person_search_outlined,
                   size: 16,
-                  color: hasCustomerFilter ? _accentRevenue : Colors.grey[600],
+                  color: hasCustomerFilter
+                      ? _accentRevenue
+                      : cs.onSurfaceVariant,
                 ),
                 label: Text(
                   hasCustomerFilter ? customerFilter! : '客戶',
                   style: TextStyle(
                     fontSize: 13,
-                    color: hasCustomerFilter
-                        ? _accentRevenue
-                        : Colors.grey[700],
+                    color: hasCustomerFilter ? _accentRevenue : cs.onSurface,
                     fontWeight: hasCustomerFilter
                         ? FontWeight.w600
                         : FontWeight.normal,
@@ -1301,27 +1546,24 @@ class _FilterBar extends StatelessWidget {
                   side: BorderSide(
                     color: hasCustomerFilter
                         ? _accentRevenue
-                        : Colors.grey.shade300,
+                        : cs.outlineVariant,
                   ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
               ),
-              // Clear buttons
               if (hasDateFilter)
                 IconButton(
-                  icon: const Icon(Icons.close, size: 16),
+                  icon: Icon(Icons.close, size: 16, color: cs.onSurfaceVariant),
                   tooltip: '清除日期',
                   onPressed: onClearDate,
-                  color: Colors.grey[500],
                 ),
               if (hasCustomerFilter)
                 IconButton(
-                  icon: const Icon(Icons.close, size: 16),
+                  icon: Icon(Icons.close, size: 16, color: cs.onSurfaceVariant),
                   tooltip: '清除客戶',
                   onPressed: onClearCustomer,
-                  color: Colors.grey[500],
                 ),
             ],
           ),
@@ -1331,7 +1573,7 @@ class _FilterBar extends StatelessWidget {
   }
 }
 
-// ─── KPI grid ────────────────────────────────────────────────────
+// ─── KPI grid ─────────────────────────────────────────────────────────────────
 
 class _KpiGrid extends StatelessWidget {
   const _KpiGrid({
@@ -1343,10 +1585,20 @@ class _KpiGrid extends StatelessWidget {
     required this.outsourceCost,
     required this.fixedCost,
     required this.avgOrderValue,
+    this.revenueTrend,
+    this.profitTrend,
+    this.costTrend,
+    this.marginTrend,
+    this.materialTrend,
+    this.outsourceTrend,
+    this.fixedTrend,
+    this.avgTrend,
   });
 
   final double revenue, profit, cost, margin;
   final double materialCost, outsourceCost, fixedCost, avgOrderValue;
+  final double? revenueTrend, profitTrend, costTrend, marginTrend;
+  final double? materialTrend, outsourceTrend, fixedTrend, avgTrend;
 
   @override
   Widget build(BuildContext context) {
@@ -1357,6 +1609,7 @@ class _KpiGrid extends StatelessWidget {
         Icons.arrow_upward_rounded,
         _accentRevenue,
         '銷售總額',
+        trend: revenueTrend,
       ),
       _KpiCardData(
         '淨利潤',
@@ -1364,6 +1617,7 @@ class _KpiGrid extends StatelessWidget {
         Icons.account_balance_wallet,
         profit >= 0 ? _accentProfit : _accentCost,
         '收入 − 成本',
+        trend: profitTrend,
       ),
       _KpiCardData(
         '總成本',
@@ -1371,6 +1625,7 @@ class _KpiGrid extends StatelessWidget {
         Icons.arrow_downward_rounded,
         _accentCost,
         '實際總支出',
+        trend: costTrend,
       ),
       _KpiCardData(
         '利潤率',
@@ -1378,6 +1633,8 @@ class _KpiGrid extends StatelessWidget {
         Icons.pie_chart,
         _accentProfit,
         '盈利能力',
+        trend: marginTrend,
+        isMarginalTrend: true,
       ),
       _KpiCardData(
         '物料成本',
@@ -1385,6 +1642,7 @@ class _KpiGrid extends StatelessWidget {
         Icons.texture,
         _accentMaterial,
         '布料 / 材料',
+        trend: materialTrend,
       ),
       _KpiCardData(
         '外包成本',
@@ -1392,6 +1650,7 @@ class _KpiGrid extends StatelessWidget {
         Icons.handshake_outlined,
         _accentOutsource,
         '外部供應商',
+        trend: outsourceTrend,
       ),
       _KpiCardData(
         '固定成本',
@@ -1399,6 +1658,7 @@ class _KpiGrid extends StatelessWidget {
         Icons.apartment_outlined,
         _accentFixed,
         '分攤管理費',
+        trend: fixedTrend,
       ),
       _KpiCardData(
         '平均客單價',
@@ -1406,6 +1666,7 @@ class _KpiGrid extends StatelessWidget {
         Icons.shopping_bag_outlined,
         _accentRevenue,
         '每張訂單平均',
+        trend: avgTrend,
       ),
     ];
 
@@ -1419,7 +1680,7 @@ class _KpiGrid extends StatelessWidget {
             crossAxisCount: cols,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio: 1.7,
+            childAspectRatio: 1.5,
           ),
           itemCount: cards.length,
           itemBuilder: (_, i) => _KpiCard(data: cards[i]),
@@ -1430,10 +1691,20 @@ class _KpiGrid extends StatelessWidget {
 }
 
 class _KpiCardData {
-  const _KpiCardData(this.title, this.value, this.icon, this.color, this.sub);
+  const _KpiCardData(
+    this.title,
+    this.value,
+    this.icon,
+    this.color,
+    this.sub, {
+    this.trend,
+    this.isMarginalTrend = false,
+  });
   final String title, value, sub;
   final IconData icon;
   final Color color;
+  final double? trend; // % change vs last period (or pp for margin)
+  final bool isMarginalTrend; // true → show as "pp" absolute points
 }
 
 class _KpiCard extends StatelessWidget {
@@ -1442,11 +1713,16 @@ class _KpiCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final trend = data.trend;
+    final trendUp = trend != null && trend > 0;
+    final trendDown = trend != null && trend < 0;
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cs.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withValues(alpha: 0.12)),
+        border: Border.all(color: cs.outlineVariant),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -1473,7 +1749,7 @@ class _KpiCard extends StatelessWidget {
               const Spacer(),
               Text(
                 data.sub,
-                style: TextStyle(fontSize: 10, color: Colors.grey[400]),
+                style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant),
               ),
             ],
           ),
@@ -1484,7 +1760,7 @@ class _KpiCard extends StatelessWidget {
                 data.title,
                 style: TextStyle(
                   fontSize: 12,
-                  color: Colors.grey[500],
+                  color: cs.onSurfaceVariant,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -1501,6 +1777,42 @@ class _KpiCard extends StatelessWidget {
                   ),
                 ),
               ),
+              if (trend != null) ...[
+                const SizedBox(height: 2),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      trendUp
+                          ? Icons.trending_up
+                          : trendDown
+                          ? Icons.trending_down
+                          : Icons.trending_flat,
+                      size: 11,
+                      color: trendUp
+                          ? _accentProfit
+                          : trendDown
+                          ? _accentCost
+                          : cs.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 2),
+                    Text(
+                      data.isMarginalTrend
+                          ? '${trend >= 0 ? '+' : ''}${trend.toStringAsFixed(1)} pp'
+                          : '${trend >= 0 ? '+' : ''}${trend.toStringAsFixed(1)}%',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: trendUp
+                            ? _accentProfit
+                            : trendDown
+                            ? _accentCost
+                            : cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ],
@@ -1509,7 +1821,7 @@ class _KpiCard extends StatelessWidget {
   }
 }
 
-// ─── Trend chart ──────────────────────────────────────────────────
+// ─── Trend chart ──────────────────────────────────────────────────────────────
 
 class _MonthlyData {
   const _MonthlyData(this.month, this.revenue, this.cost, this.profit);
@@ -1523,8 +1835,17 @@ class _TrendChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     if (data.isEmpty) {
-      return const SizedBox(height: 180, child: Center(child: Text('暫無數據')));
+      return SizedBox(
+        height: 180,
+        child: Center(
+          child: Text(
+            '暫無數據',
+            style: TextStyle(color: cs.onSurfaceVariant),
+          ),
+        ),
+      );
     }
 
     final maxY = data.fold<double>(0, (m, d) => m < d.revenue ? d.revenue : m);
@@ -1542,9 +1863,9 @@ class _TrendChart extends StatelessWidget {
     return Container(
       height: 230,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cs.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withValues(alpha: 0.12)),
+        border: Border.all(color: cs.outlineVariant),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -1576,7 +1897,7 @@ class _TrendChart extends StatelessWidget {
                   show: true,
                   drawVerticalLine: false,
                   getDrawingHorizontalLine: (v) => FlLine(
-                    color: Colors.grey.withValues(alpha: 0.15),
+                    color: cs.outlineVariant.withValues(alpha: 0.5),
                     strokeWidth: 1,
                   ),
                 ),
@@ -1606,7 +1927,7 @@ class _TrendChart extends StatelessWidget {
                             DateFormat('MM月').format(data[idx].month),
                             style: TextStyle(
                               fontSize: 10,
-                              color: Colors.grey[500],
+                              color: cs.onSurfaceVariant,
                             ),
                           ),
                         );
@@ -1621,13 +1942,13 @@ class _TrendChart extends StatelessWidget {
                 ],
                 lineTouchData: LineTouchData(
                   touchTooltipData: LineTouchTooltipData(
-                    getTooltipColor: (_) => Colors.black87,
+                    getTooltipColor: (_) => cs.inverseSurface,
                     getTooltipItems: (spots) => spots
                         .map(
                           (s) => LineTooltipItem(
                             _fmtHKD(s.y),
-                            const TextStyle(
-                              color: Colors.white,
+                            TextStyle(
+                              color: cs.onInverseSurface,
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
                             ),
@@ -1683,13 +2004,19 @@ class _LegendDot extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 4),
-        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
       ],
     );
   }
 }
 
-// ─── Cost composition pie ─────────────────────────────────────────
+// ─── Cost composition pie ─────────────────────────────────────────────────────
 
 class _CostCompositionCard extends StatelessWidget {
   const _CostCompositionCard({
@@ -1701,6 +2028,7 @@ class _CostCompositionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final sections = [
       _CostSlice('物料', totalMaterialCost, _accentMaterial),
       _CostSlice('外包', totalOutsourcingCost, _accentOutsource),
@@ -1711,9 +2039,9 @@ class _CostCompositionCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cs.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withValues(alpha: 0.12)),
+        border: Border.all(color: cs.outlineVariant),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -1724,7 +2052,15 @@ class _CostCompositionCard extends StatelessWidget {
       ),
       padding: const EdgeInsets.all(20),
       child: total <= 0
-          ? const SizedBox(height: 100, child: Center(child: Text('所選期間無成本記錄')))
+          ? SizedBox(
+              height: 100,
+              child: Center(
+                child: Text(
+                  '所選期間無成本記錄',
+                  style: TextStyle(color: cs.onSurfaceVariant),
+                ),
+              ),
+            )
           : LayoutBuilder(
               builder: (context, constraints) {
                 final isWide = constraints.maxWidth > 600;
@@ -1762,9 +2098,10 @@ class _CostCompositionCard extends StatelessWidget {
                   children: [
                     Text(
                       '總成本: ${_fmtHKD(total)}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.bold,
+                        color: cs.onSurface,
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -1786,8 +2123,9 @@ class _CostCompositionCard extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 s.label,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontWeight: FontWeight.w600,
+                                  color: cs.onSurface,
                                 ),
                               ),
                             ),
@@ -1795,7 +2133,7 @@ class _CostCompositionCard extends StatelessWidget {
                               '${((s.value / total) * 100).toStringAsFixed(1)}%  ·  ${_fmtHKD(s.value)}',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey[600],
+                                color: cs.onSurfaceVariant,
                               ),
                             ),
                           ],
@@ -1831,11 +2169,13 @@ class _CostSlice {
   final Color color;
 }
 
-// ─── Order breakdown list ─────────────────────────────────────────
+// ─── Order breakdown list ─────────────────────────────────────────────────────
 
 class _OrderBreakdownList extends StatelessWidget {
   const _OrderBreakdownList({
     required this.orders,
+    required this.sortBy,
+    required this.sortDesc,
     required this.resolveRevenue,
     required this.resolveOutsourcing,
     required this.resolveTotalCost,
@@ -1843,6 +2183,8 @@ class _OrderBreakdownList extends StatelessWidget {
   });
 
   final List<Order> orders;
+  final String sortBy;
+  final bool sortDesc;
   final double Function(Order) resolveRevenue;
   final double Function(Order) resolveOutsourcing;
   final double Function(Order) resolveTotalCost;
@@ -1850,24 +2192,50 @@ class _OrderBreakdownList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final active = orders.where((o) => o.status != 'cancelled').toList();
+
+    active.sort((a, b) {
+      double valA, valB;
+      switch (sortBy) {
+        case 'margin':
+          final revA = resolveRevenue(a), costA = resolveTotalCost(a);
+          final revB = resolveRevenue(b), costB = resolveTotalCost(b);
+          valA = revA > 0 ? ((revA - costA) / revA) : -999;
+          valB = revB > 0 ? ((revB - costB) / revB) : -999;
+        case 'revenue':
+          valA = resolveRevenue(a);
+          valB = resolveRevenue(b);
+        default: // 'date'
+          valA = (a.createdAt ?? DateTime(2000))
+              .millisecondsSinceEpoch
+              .toDouble();
+          valB = (b.createdAt ?? DateTime(2000))
+              .millisecondsSinceEpoch
+              .toDouble();
+      }
+      return sortDesc ? valB.compareTo(valA) : valA.compareTo(valB);
+    });
+
     if (active.isEmpty) {
       return Container(
         height: 80,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: cs.surfaceContainerLow,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.grey.withValues(alpha: 0.12)),
+          border: Border.all(color: cs.outlineVariant),
         ),
-        child: const Center(child: Text('暫無訂單')),
+        child: Center(
+          child: Text('暫無訂單', style: TextStyle(color: cs.onSurfaceVariant)),
+        ),
       );
     }
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cs.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withValues(alpha: 0.12)),
+        border: Border.all(color: cs.outlineVariant),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -1880,7 +2248,7 @@ class _OrderBreakdownList extends StatelessWidget {
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
         itemCount: active.length,
-        separatorBuilder: (_, _) => Divider(height: 1, color: Colors.grey[100]),
+        separatorBuilder: (_, _) => Divider(height: 1, color: cs.outlineVariant),
         itemBuilder: (_, i) {
           final order = active[i];
           final rev = resolveRevenue(order);
@@ -1915,19 +2283,20 @@ class _OrderBreakdownList extends StatelessWidget {
                       children: [
                         Text(
                           order.customerName,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 14,
+                            color: cs.onSurface,
                           ),
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          DateFormat(
-                            'yyyy-MM-dd',
-                          ).format(order.createdAt ?? DateTime.now()),
+                          DateFormat('yyyy-MM-dd').format(
+                            order.createdAt ?? DateTime.now(),
+                          ),
                           style: TextStyle(
                             fontSize: 11,
-                            color: Colors.grey[400],
+                            color: cs.onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -1964,9 +2333,10 @@ class _OrderBreakdownList extends StatelessWidget {
                               vertical: 1,
                             ),
                             decoration: BoxDecoration(
-                              color:
-                                  (isProfitable ? _accentProfit : _accentCost)
-                                      .withValues(alpha: 0.1),
+                              color: (isProfitable
+                                      ? _accentProfit
+                                      : _accentCost)
+                                  .withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -1985,7 +2355,7 @@ class _OrderBreakdownList extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(width: 4),
-                  Icon(Icons.chevron_right, size: 18, color: Colors.grey[300]),
+                  Icon(Icons.chevron_right, size: 18, color: cs.outlineVariant),
                 ],
               ),
             ),

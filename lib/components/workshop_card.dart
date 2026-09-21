@@ -91,10 +91,10 @@ class WorkshopCard extends StatelessWidget {
                         // 縮小版的客人名稱
                         Text(
                           order.customer,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w900,
-                            color: Colors.black87,
+                            color: Theme.of(context).colorScheme.onSurface,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -310,9 +310,11 @@ class WorkshopCard extends StatelessWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: Colors.white.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey.shade200),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.12),
+                  ),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -320,7 +322,7 @@ class WorkshopCard extends StatelessWidget {
                     IconText(
                       Icons.checkroom,
                       size: 18,
-                      color: Colors.grey[600],
+                      color: Colors.grey[400],
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -329,7 +331,7 @@ class WorkshopCard extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: Colors.grey[800],
+                          color: Theme.of(context).colorScheme.onSurface,
                           height: 1.4,
                         ),
                         maxLines: 2,
@@ -362,8 +364,8 @@ class WorkshopCard extends StatelessWidget {
                       color: isOverdue
                           ? Colors.red
                           : (isDueSoon
-                                ? Colors.orange[800]!
-                                : Colors.grey[700]!),
+                                ? Colors.orange[400]!
+                                : Colors.grey[400]!),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -472,7 +474,7 @@ class WorkshopCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
                         value: order.progress / 100.0,
-                        backgroundColor: Colors.grey[200],
+                        backgroundColor: Colors.white.withValues(alpha: 0.1),
                         color: isCompleted ? Colors.green : cardColor,
                         minHeight: 5,
                       ),

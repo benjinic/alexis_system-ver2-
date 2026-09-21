@@ -215,6 +215,16 @@ Web build 時必須提供 Firebase App Check reCAPTCHA v3 site key：
 flutter build web --release --no-tree-shake-icons --no-wasm-dry-run --dart-define=FIREBASE_APPCHECK_RECAPTCHA_KEY=<site-key>
 ```
 
+### 員工名單（staff）與存取控制
+
+Firestore / Storage 規則與所有 Cloud Functions 都要求呼叫者的 uid 存在於 Firestore `staff/{uid}`，只登入 Firebase Auth 並不足夠（匿名或自行註冊的帳號會被拒絕）。
+
+- `staff/{uid}` 不允許 client 寫入，只能由 Cloud Functions（Admin SDK）或 Firebase Console 寫入；使用者只能讀取自己的那筆。
+- 新增員工：Settings → 員工帳號管理，會呼叫 `createStaffAccount` 函式建立 Auth 帳號並加入名單。
+- 手動加入員工：Firebase Console → Firestore → `staff` collection，文件 ID 填該帳號的 UID，欄位 `email`（string）。
+- Firebase Auth 應停用 Anonymous / Google 登入，並在 Authentication → Settings → User actions 關閉「Enable create (sign-up)」。
+- `tool/smoke_gemini_proxy.js` 使用匿名帳號，現在會被 403 拒絕，僅能用於確認未授權帳號無法呼叫 proxy。
+
 ### SSR Function Secret 設定
 
 SSR Functions 的 service account private key 需放在 Firebase Secret Manager，不應以 plain environment variable 部署。
@@ -249,6 +259,7 @@ FIREBASE_APPCHECK_TOKEN=<token> node tool/smoke_gemini_proxy.js
 flutter analyze
 flutter test
 flutter build web --release --no-tree-shake-icons --no-wasm-dry-run --dart-define=FIREBASE_APPCHECK_RECAPTCHA_KEY=<site-key>
+firebase login --reauth
 firebase deploy --only functions,firestore:rules,storage,hosting --project alexis-tailor-system-2025
 node tool/audit_functions_env.js
 FIREBASE_APPCHECK_TOKEN=<token> node tool/smoke_gemini_proxy.js
@@ -312,6 +323,139 @@ curl -s https://alexis-tailor-system-2025.web.app/assets/FontManifest.json
 
 ---
 
+## 系統使用說明
+
+### 登入
+
+系統使用 Firebase Authentication。開啟網址後若未登入，系統會自動跳轉至登入頁面。使用指定的電子郵件帳號與密碼登入即可。
+
+> 注意：請務必從根網址（`https://alexis-tailor-system-2025.web.app/`）進入，直接開啟深層連結（如 `#/orders`）在未登入狀態下會出現 Firestore 權限錯誤。
+
+---
+
+### 儀表板（Dashboard）
+
+總覽當日與本月的核心業績數據：
+
+- **KPI 卡片**：今日訂單數、本月收入、待收款金額、客戶總數
+- **趨勢對比**：每張卡片與上期數據比較，顯示升跌百分比
+- **快速入口**：Pending 訂單、Outstanding（未收款）訂單
+
+---
+
+### POS 收銀（POS）
+
+用於建立新訂單或編輯現有訂單：
+
+1. **選擇客戶**：輸入名稱搜尋現有客戶，或直接輸入新客戶名稱
+2. **新增服裝項目**：選擇服務（西裝、褲子等）→ 設定布料、布料用量、數量
+3. **金額設定**：調整折扣、訂金、付款方式
+4. **交貨日期**：可選設定交貨日
+5. **確認建立**：按「建立訂單」完成
+
+> 布料欄位支援以布料庫存 ID 搜尋，選中後自動填入成本計算。
+
+---
+
+### 訂單管理（Orders）
+
+列出所有 POS 訂單：
+
+| 功能 | 操作 |
+|------|------|
+| 搜尋 | 輸入客戶名稱、訂單號、布料名稱或服務名稱 |
+| 篩選 | Pending（未確認）/ Outstanding（未收款） |
+| 查看詳情 | 點選任一訂單卡片 |
+| 編輯訂單 | 詳情對話框 → Edit 按鈕 |
+| 列印收據 | 詳情對話框 → Print 按鈕 |
+| 相片記錄 | 詳情對話框 → Photos 按鈕 |
+| 確認訂單 | 詳情對話框 → Confirm Order（Pending → Confirmed） |
+| 標記完成 | 詳情對話框 → Mark as Complete（Confirmed → Completed） |
+| 布料訂購 | 詳情對話框 → Mark Fabric Ordered / Fabric Ready |
+| 匯出 CSV | AppBar 右上角下載按鈕 → 選擇日期範圍 → 匯出 |
+
+**訂單狀態流程：** `Pending → Confirmed → Completed`
+
+**CSV 匯出**：按下下載按鈕後，可選擇開始日期與結束日期；兩者均不選則匯出全部訂單。
+
+---
+
+### 客戶管理（Clients）
+
+管理客戶檔案與聯絡紀錄：
+
+- **新增客戶**：右上角「＋」按鈕，填寫姓名（必填）、電話、電郵
+  - 姓名與電話均設有防重複檢查
+  - 姓名自動轉換為大寫
+- **搜尋客戶**：輸入名稱或電話號碼
+- **客戶詳情頁**：顯示訂單歷史、總消費金額、客戶等級（New / Regular / VIP）
+  - 編輯基本資料（姓名、電話、電郵）
+  - 管理體型尺寸（肩寬、胸圍、腰圍等）
+  - 新增跟進日期（Next Follow-Up）
+  - 記錄聯絡日誌（通話 / 試身 / 訊息 / 備註）
+
+**客戶等級標準：**
+
+| 等級 | 總消費門檻 |
+|------|-----------|
+| New | < $10,000 |
+| Regular | $10,000 – $49,999 |
+| VIP | ≥ $50,000 |
+
+---
+
+### 布料庫存（Fabric）
+
+管理布料庫存：
+
+- **新增布料**：填寫名稱、類別、單位、每單位成本、零售價、庫存數量、補貨警戒線
+- **編輯布料**：點選布料卡片 → Edit
+- **庫存調整**：直接在卡片上加減庫存數量
+- **批次 AI 掃描**：AppBar 相機按鈕 → 上傳供應商圖片或布卡照片
+  - AI 自動辨識並提取：名稱、類別、顏色、成本、零售價
+  - 核對表確認後再批次入庫
+  - 同名布料自動標示「已存在」並鎖定，防止重複入庫
+
+---
+
+### 工作坊（Shop）
+
+追蹤生產進度：
+
+- **工作單列表**：顯示所有進行中的生產項目
+- **優先標記**：標為 Urgent 的訂單在導覽欄顯示紅色數字角標
+- **布料狀態**：每張工作單可標記布料是否已訂購
+- **逾期提示**：超過交貨日的工作單以紅色顯示
+
+---
+
+### 訂製訂單（Bespoke）
+
+訂製西裝訂單功能已拆出為獨立 Flutter App：`../alexis_bespoke`（與本系統共用同一個 Firebase 專案與登入帳號）。
+本系統不再包含 Bespoke 頁面與導覽入口，但 Firestore collection `bespoke_orders` 的安全規則仍保留在本專案的 `firestore.rules`（同一個 Firebase 專案共用一份規則）。
+
+---
+
+### Cost & Profit 分析
+
+（從 Dashboard 進入或透過連結開啟）
+
+- 每筆訂單的收入、成本、利潤明細
+- 按日期 / 利潤率 / 收入排序
+- 虧損訂單自動顯示紅色警示橫幅
+- 趨勢對比：與上期同類數據比較（升跌箭頭）
+
+---
+
+### 設定（Settings）
+
+- **主題色**：自訂主色調
+- **語言**：繁體中文 / 簡體中文 / English
+- **深色模式**：系統跟隨 / 強制深色 / 強制淺色
+- **體型量度欄位**：自訂客戶量身時的量度項目
+
+---
+
 ## 更新紀錄
 
 ### 2025-05-19
@@ -343,3 +487,56 @@ curl -s https://alexis-tailor-system-2025.web.app/assets/FontManifest.json
 - 收據字型大小整體增加 2pt
 - 移除布料明細中的 `Code: xxx` 欄位
 - POS 購物車每項布料顯示材料成本（`Mat: $x.x`）及外包成本（`Out: $x.x`）
+
+### 2026-07-21
+
+**布料批次 AI 掃描（Service 層）**
+- `AiFabricScanResult` 新增 `costPerUnit` 與 `retailPrice`（`double?`，選填），不影響現有單筆掃描呼叫方
+- `AiFabricScanService` 新增 `scanFabricLabelBatch()`：接收相同的 `imageBytes + mimeType`，回傳 `List<AiFabricScanResult>`
+- 新增 `_batchPrompt`：同時支援兩種照片格式（供應商文字清單 / 多張實體布卡並排），要求 Gemini 辨識所有布料並回傳 JSON 陣列
+- 新增 `parseGeminiResponseBatch()` / `parseFabricJsonArrayText()`：容錯剝除 markdown code fence、解析失敗時回傳空 `[]` 不 crash
+- 新增 `_parseNullableDouble()`：容錯處理 Gemini 回傳的 `num / String / null` 型別差異
+- 現有 `scanFabricLabel()` 及所有 UI 檔案均未修改
+
+**布料批次 AI 掃描（UI 層）**
+- `fabric_page.dart` AppBar 新增 `Icons.document_scanner` 按鈕，觸發批次掃描流程
+- `_BatchScanManagerDialog`（StatefulWidget）：每次點擊「選擇圖片」可 Shift/Ctrl-click 選多張；選後逐張呼叫 `scanFabricLabelBatch()`，每張有獨立 log 條目（三態：掃描中 / 完成 / 失敗）；掃描完畢後可再次追加圖片
+- `_showBatchReviewDialog()`：N 筆可編輯列表（名稱 / 類別 Dropdown / 成本 / 零售價 / checkbox）；空名稱列自動標紅並鎖定 checkbox；與現有庫存重名顯示「已存在」badge；批次內重名顯示「批次重複」badge；頂部即時顯示「共辨識 N 筆，將入庫 M 筆」；「全部入庫」按鈕逐筆呼叫 `addMaterial()` 並顯示進度；取消不寫入任何資料
+- 新增 `_BatchRow` / `_ScanLogEntry` / `_LogStatus` 輔助類別；所有顏色沿用 M3 colorScheme token
+- 建議新增 l10n key：`batchScan` / `batchScanResults` / `batchScanning` / `batchImport`
+
+### 2026-08-21
+
+**Cost & Profit 頁面強化**
+- CP-1：所有硬編碼色（`Colors.white/grey.*`）全換為 M3 `colorScheme` 語義 token，支援深色模式
+- CP-2：新增 `_SortBar` chip UI（日期 / 利潤率 / 收入）+ 排序方向切換按鈕
+- CP-3：計算 `lossCount/totalLoss`，有虧損時顯示 `_LossAlert` 紅色橫幅
+- CP-4：`_filterOrdersByLastPeriod()` 計算上期數據，KPI 卡片新增趨勢箭頭（`trending_up/down/flat`）與 `±%` / `±pp` 標示
+
+**布料批次 AI 掃描修正**
+- 解析強化：`parseFabricJsonArrayText` 新增第二層解析，從回應中截取 `[…]` 區段，處理 Gemini 在 JSON 前後加說明文字的情況
+- 掃描失敗時 log 顯示實際錯誤原因（例如「API 錯誤 401」），而非通用「掃描失敗」
+- 「選擇圖片」改用 `pickMultiImage()`，開啟 `<input multiple>` 檔案選擇器，用戶可 Shift/Ctrl-click 一次選取多張；選完後逐張自動掃描，每張獨立更新 log
+
+### 2026-08-22
+
+**布料批次核對表欄位完整（FB-6）**
+- `_BatchRow` 新增 `colorCtrl`（AI 自動填入大寫顏色）、`unitCtrl`（預設 M）、`isOnline`（Switch）、`costCtrl`、`retailCtrl`
+- 核對表改為雙行佈局：上行（名稱 / 類別 / 上架開關），下行（顏色 / 單位 / 成本 / 零售價）
+- `addMaterial()` 呼叫補傳所有新欄位，與單筆新增欄項完全對齊
+
+**批次掃描防重複（FB-7）**
+- DB 已存在相同名稱的布料：自動取消勾選並鎖定 checkbox（無法手動勾回，無法入庫）
+- 核對表列顯示「已存在」badge；`rowWillSave` 邏輯排除 DB 重名行
+- 批次內出現相同名稱：顯示「批次重複」badge 但不鎖定，由用戶決定保留哪一筆
+
+**客戶新增防重複（CD-9）**
+- 儲存前呼叫 `getCustomersStream().first` 比對現有客戶資料
+- 名稱完全相符（不分大小寫）時阻擋並顯示  錯誤 SnackBar
+- 電話號碼不為空時亦檢查是否重複
+
+**批次掃描圖片自動入庫（FB-8）**
+- 新增 `_ScanImageGroup` data class，將每張掃描圖的 bytes 與辨識結果綁定
+- 核對表每行顯示來源圖縮圖（44×44 px）供對照
+- 「全部入庫」前先對每個不同來源圖上傳一次（`imageUrlCache` Map 去重），避免同一張圖重複上傳
+- 每筆布料的 `MaterialItem.imageUrl` 自動填入對應上傳 URL

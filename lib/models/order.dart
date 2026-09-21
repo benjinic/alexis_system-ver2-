@@ -21,6 +21,7 @@ class Order {
   final String? balancePaymentMethod;
   final DateTime? balancePaidDate;
   final double balance;
+  final List<BalancePayment> payments;
 
   final double materialCost;
   final double laborCost;
@@ -37,6 +38,7 @@ class Order {
   final DateTime? date; // 新 POS: 訂單日期，與 createdAt 相容
   final DateTime? deliveryDate; // 新 POS: 交貨日期
   final bool isFabricOrdered; // 是否已訂購布料
+  final String notes; // 訂單備注
 
   Order({
     required this.id,
@@ -54,6 +56,7 @@ class Order {
     this.balancePaymentMethod,
     this.balancePaidDate,
     required this.balance,
+    this.payments = const [],
     this.materialCost = 0.0,
     this.laborCost = 0.0,
     this.outsourcingCost = 0.0,
@@ -68,6 +71,7 @@ class Order {
     this.date,
     this.deliveryDate,
     this.isFabricOrdered = false,
+    this.notes = '',
   });
 
   bool get isFullyPaid => balance <= 0;
@@ -162,6 +166,34 @@ class Order {
                 : DateTime.tryParse(map['balancePaidDate'].toString()))
           : null,
       balance: _parseDouble(map['balance']),
+      payments: (() {
+        final raw = map['payments'];
+        if (raw is List && raw.isNotEmpty) {
+          return raw
+              .map((p) => BalancePayment.fromMap(p as Map))
+              .toList();
+        }
+        // Backward compat: migrate old single-payment fields into list
+        final legacyAmt = _parseDouble(map['balancePayment']);
+        if (legacyAmt > 0) {
+          DateTime legacyDate = DateTime.now();
+          if (map['balancePaidDate'] is Timestamp) {
+            legacyDate = (map['balancePaidDate'] as Timestamp).toDate();
+          } else if (map['balancePaidDate'] != null) {
+            legacyDate =
+                DateTime.tryParse(map['balancePaidDate'].toString()) ??
+                    DateTime.now();
+          }
+          return [
+            BalancePayment(
+              amount: legacyAmt,
+              method: map['balancePaymentMethod']?.toString() ?? 'Cash',
+              paidAt: legacyDate,
+            ),
+          ];
+        }
+        return <BalancePayment>[];
+      })(),
       materialCost: _parseDouble(map['materialCost']),
       laborCost: _parseDouble(map['laborCost']),
       outsourcingCost: _parseDouble(map['outsourcingCost']),
@@ -192,6 +224,7 @@ class Order {
                 : DateTime.tryParse(map['deliveryDate'].toString()))
           : null,
       isFabricOrdered: map['isFabricOrdered'] == true,
+      notes: map['notes']?.toString() ?? '',
     );
   }
 
@@ -211,6 +244,7 @@ class Order {
       'balancePaymentMethod': balancePaymentMethod,
       'balancePaidDate': balancePaidDate,
       'balance': balance,
+      'payments': payments.map((p) => p.toJson()).toList(),
       'materialCost': materialCost,
       'laborCost': laborCost,
       'outsourcingCost': outsourcingCost,
@@ -225,6 +259,7 @@ class Order {
       'date': date,
       'deliveryDate': deliveryDate,
       'isFabricOrdered': isFabricOrdered,
+      'notes': notes,
     };
   }
 
@@ -241,6 +276,7 @@ class Order {
     String? balancePaymentMethod,
     DateTime? balancePaidDate,
     double? balance,
+    List<BalancePayment>? payments,
     double? materialCost,
     double? laborCost,
     double? outsourcingCost,
@@ -254,6 +290,7 @@ class Order {
     DateTime? date,
     DateTime? deliveryDate,
     bool? isFabricOrdered,
+    String? notes,
   }) {
     return Order(
       id: id ?? this.id,
@@ -271,6 +308,7 @@ class Order {
       balancePaymentMethod: balancePaymentMethod ?? this.balancePaymentMethod,
       balancePaidDate: balancePaidDate ?? this.balancePaidDate,
       balance: balance ?? this.balance,
+      payments: payments ?? this.payments,
       materialCost: materialCost ?? this.materialCost,
       laborCost: laborCost ?? this.laborCost,
       outsourcingCost: outsourcingCost ?? this.outsourcingCost,
@@ -284,6 +322,7 @@ class Order {
       date: date ?? this.date,
       deliveryDate: deliveryDate ?? this.deliveryDate,
       isFabricOrdered: isFabricOrdered ?? this.isFabricOrdered,
+      notes: notes ?? this.notes,
     );
   }
 }
@@ -300,6 +339,7 @@ class OrderItem {
   final double cost;
   final bool isFabricOrdered;
   final bool manualUnitPrice;
+  final bool sendToWorkshop; // UI-only: controls workshop order creation on save
 
   // === 新 POS 系統欄位 ===
   final String? serviceName; // 新 POS: 服務名稱，與 service 重複但保留以相容
@@ -319,6 +359,7 @@ class OrderItem {
     this.cost = 0.0,
     this.isFabricOrdered = false,
     this.manualUnitPrice = false,
+    this.sendToWorkshop = true,
     // 新 POS 欄位
     this.serviceName,
     this.fabricCode,
@@ -346,6 +387,7 @@ class OrderItem {
       cost: Order._parseDouble(map['cost']),
       isFabricOrdered: map['isFabricOrdered'] == true,
       manualUnitPrice: map['manualUnitPrice'] == true,
+      sendToWorkshop: false, // existing items: don't re-create workshop orders
       // 新 POS 欄位
       serviceName: map['serviceName']?.toString(),
       fabricCode: map['fabricCode']?.toString(),
@@ -367,6 +409,7 @@ class OrderItem {
       'cost': cost,
       'isFabricOrdered': isFabricOrdered,
       'manualUnitPrice': manualUnitPrice,
+      // sendToWorkshop is UI-only, not persisted to Firestore
       // 新 POS 欄位
       'serviceName': serviceName,
       'fabricCode': fabricCode,
@@ -387,6 +430,7 @@ class OrderItem {
     double? cost,
     bool? isFabricOrdered,
     bool? manualUnitPrice,
+    bool? sendToWorkshop,
     String? serviceName,
     String? fabricCode,
     double? fabricCost,
@@ -404,10 +448,44 @@ class OrderItem {
       cost: cost ?? this.cost,
       isFabricOrdered: isFabricOrdered ?? this.isFabricOrdered,
       manualUnitPrice: manualUnitPrice ?? this.manualUnitPrice,
+      sendToWorkshop: sendToWorkshop ?? this.sendToWorkshop,
       serviceName: serviceName ?? this.serviceName,
       fabricCode: fabricCode ?? this.fabricCode,
       fabricCost: fabricCost ?? this.fabricCost,
       fabricUsage: fabricUsage ?? this.fabricUsage,
     );
   }
+}
+
+class BalancePayment {
+  final double amount;
+  final String method;
+  final DateTime paidAt;
+
+  const BalancePayment({
+    required this.amount,
+    required this.method,
+    required this.paidAt,
+  });
+
+  factory BalancePayment.fromMap(Map<dynamic, dynamic> map) {
+    DateTime parsedDate = DateTime.now();
+    if (map['paidAt'] is Timestamp) {
+      parsedDate = (map['paidAt'] as Timestamp).toDate();
+    } else if (map['paidAt'] != null) {
+      parsedDate =
+          DateTime.tryParse(map['paidAt'].toString()) ?? DateTime.now();
+    }
+    return BalancePayment(
+      amount: Order._parseDouble(map['amount']),
+      method: map['method']?.toString() ?? 'Cash',
+      paidAt: parsedDate,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'amount': amount,
+        'method': method,
+        'paidAt': paidAt,
+      };
 }

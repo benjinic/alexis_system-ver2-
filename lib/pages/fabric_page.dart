@@ -15,6 +15,267 @@ class FabricPage extends StatefulWidget {
   State<FabricPage> createState() => _FabricPageState();
 }
 
+// ─── Batch scan helpers ───────────────────────────────────────────────────────
+
+/// Groups one scanned image with the fabric results Gemini extracted from it.
+class _ScanImageGroup {
+  const _ScanImageGroup({required this.imageBytes, required this.results});
+  final Uint8List imageBytes;
+  final List<AiFabricScanResult> results;
+}
+
+class _BatchRow {
+  _BatchRow({
+    required this.nameCtrl,
+    required this.category,
+    required this.colorCtrl,
+    required this.costCtrl,
+    required this.retailCtrl,
+    required this.unitCtrl,
+    required this.isOnline,
+    required this.checked,
+    this.sourceImageBytes,
+  });
+
+  factory _BatchRow.fromResult(
+    AiFabricScanResult r, {
+    Uint8List? imageBytes,
+  }) {
+    const validCats = ['Cotton', 'Linen', 'Wool', 'Other'];
+    return _BatchRow(
+      nameCtrl: TextEditingController(text: r.name),
+      category: validCats.contains(r.category) ? r.category : 'Other',
+      colorCtrl: TextEditingController(text: r.color.toUpperCase()),
+      costCtrl: TextEditingController(
+        text: (r.costPerUnit != null && r.costPerUnit! > 0)
+            ? r.costPerUnit!.toStringAsFixed(0)
+            : '',
+      ),
+      retailCtrl: TextEditingController(
+        text: (r.retailPrice != null && r.retailPrice! > 0)
+            ? r.retailPrice!.toStringAsFixed(0)
+            : '',
+      ),
+      unitCtrl: TextEditingController(text: 'm'),
+      isOnline: false,
+      checked: r.name.isNotEmpty,
+      sourceImageBytes: imageBytes,
+    );
+  }
+
+  final TextEditingController nameCtrl;
+  String category;
+  final TextEditingController colorCtrl;
+  final TextEditingController costCtrl;
+  final TextEditingController retailCtrl;
+  final TextEditingController unitCtrl;
+  bool isOnline;
+  bool checked;
+  final Uint8List? sourceImageBytes;
+}
+
+class _BatchScanManagerDialog extends StatefulWidget {
+  const _BatchScanManagerDialog({
+    required this.fabricScanService,
+    required this.onComplete,
+  });
+
+  final AiFabricScanService fabricScanService;
+  final void Function(List<_ScanImageGroup>) onComplete;
+
+  @override
+  State<_BatchScanManagerDialog> createState() =>
+      _BatchScanManagerDialogState();
+}
+
+class _BatchScanManagerDialogState extends State<_BatchScanManagerDialog> {
+  final List<_ScanImageGroup> _groups = [];
+  final List<_ScanLogEntry> _log = [];
+  bool _isScanning = false;
+  int _imageCount = 0;
+
+  int get _totalResults =>
+      _groups.fold(0, (sum, g) => sum + g.results.length);
+
+  Future<void> _pickAndScan() async {
+    final picker = ImagePicker();
+    final images = await picker.pickMultiImage();
+    if (images.isEmpty || !mounted) return;
+
+    setState(() => _isScanning = true);
+
+    for (final image in images) {
+      if (!mounted) break;
+
+      _imageCount++;
+      final idx = _imageCount;
+      setState(() {
+        _log.add(
+          _ScanLogEntry(label: '正在掃描第 $idx 張…', status: _LogStatus.scanning),
+        );
+      });
+
+      try {
+        final bytes = await image.readAsBytes();
+        if (!mounted) break;
+        final ext = image.name.split('.').last.toLowerCase();
+        final mimeType = switch (ext) {
+          'png' => 'image/png',
+          'gif' => 'image/gif',
+          'webp' => 'image/webp',
+          'heic' || 'heif' => 'image/heic',
+          _ => 'image/jpeg',
+        };
+        final results = await widget.fabricScanService.scanFabricLabelBatch(
+          imageBytes: bytes,
+          mimeType: mimeType,
+        );
+        if (!mounted) break;
+        setState(() {
+          _groups.add(_ScanImageGroup(imageBytes: bytes, results: results));
+          _log.last = _ScanLogEntry(
+            label: '第 $idx 張：辨識出 ${results.length} 筆',
+            status: _LogStatus.done,
+          );
+        });
+      } catch (e) {
+        debugPrint('Batch scan image $idx error: $e');
+        if (!mounted) break;
+        final errMsg = e.toString().replaceFirst('Exception: ', '');
+        setState(() {
+          _log.last = _ScanLogEntry(
+            label: '第 $idx 張：掃描失敗 — $errMsg',
+            status: _LogStatus.error,
+          );
+        });
+      }
+    }
+
+    if (mounted) setState(() => _isScanning = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Dialog(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Batch AI Scan', // l10n: batchScan
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '已掃描 $_imageCount 張，共辨識 $_totalResults 筆布料',
+                style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+              ),
+              if (_log.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 160),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: cs.outlineVariant),
+                  ),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    itemCount: _log.length,
+                    itemBuilder: (_, i) {
+                      final entry = _log[i];
+                      final (icon, color) = switch (entry.status) {
+                        _LogStatus.scanning => (Icons.hourglass_top, cs.primary),
+                        _LogStatus.done => (Icons.check_circle_outline, cs.tertiary),
+                        _LogStatus.error => (Icons.error_outline, cs.error),
+                      };
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          children: [
+                            Icon(icon, size: 14, color: color),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                entry.label,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: cs.onSurface,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: _isScanning
+                        ? null
+                        : () => Navigator.pop(context),
+                    child: const Text('取消'),
+                  ),
+                  const Spacer(),
+                  OutlinedButton.icon(
+                    onPressed: _isScanning ? null : _pickAndScan,
+                    icon: _isScanning
+                        ? SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: cs.primary,
+                            ),
+                          )
+                        : const Icon(Icons.add_photo_alternate_outlined, size: 18),
+                    label: Text(_isScanning ? '掃描中…' : '選擇圖片'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: (_isScanning || _groups.isEmpty)
+                        ? null
+                        : () {
+                            final groups =
+                                List<_ScanImageGroup>.from(_groups);
+                            Navigator.pop(context);
+                            widget.onComplete(groups);
+                          },
+                    child: Text('核對入庫 ($_totalResults)'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum _LogStatus { scanning, done, error }
+
+class _ScanLogEntry {
+  const _ScanLogEntry({required this.label, required this.status});
+  final String label;
+  final _LogStatus status;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _FabricPageState extends State<FabricPage>
     with SingleTickerProviderStateMixin {
   final DatabaseService _dbService = DatabaseService();
@@ -202,7 +463,7 @@ class _FabricPageState extends State<FabricPage>
                         children: [
                           Center(
                             child: GestureDetector(
-                              onTap: () async {
+                              onTap: _isAiScanning ? null : () async {
                                 final ImagePicker picker = ImagePicker();
                                 final XFile? image = await picker.pickImage(
                                   source: ImageSource.gallery,
@@ -259,10 +520,43 @@ class _FabricPageState extends State<FabricPage>
                                               )
                                             : null),
                                 ),
-                                child:
-                                    (pickedImageBytes == null &&
-                                        (currentImageUrl == null ||
-                                            currentImageUrl.isEmpty))
+                                child: _isAiScanning
+                                    ? Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.55,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                        child: const Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            SizedBox(
+                                              width: 24,
+                                              height: 24,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                            SizedBox(height: 6),
+                                            Text(
+                                              'AI Scanning…',
+                                              style: TextStyle(
+                                                fontSize: 9,
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      )
+                                    : (pickedImageBytes == null &&
+                                          (currentImageUrl == null ||
+                                              currentImageUrl.isEmpty))
                                     ? Column(
                                         mainAxisAlignment:
                                             MainAxisAlignment.center,
@@ -577,12 +871,709 @@ class _FabricPageState extends State<FabricPage>
     );
   }
 
+  void _startBatchScan() {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _BatchScanManagerDialog(
+        fabricScanService: _aiFabricScanService,
+        onComplete: _showBatchReviewDialog,
+      ),
+    );
+  }
+
+  void _showBatchReviewDialog(List<_ScanImageGroup> groups) {
+    const validCats = ['Cotton', 'Linen', 'Wool', 'Other'];
+    final rows = [
+      for (final g in groups)
+        for (final r in g.results)
+          _BatchRow.fromResult(r, imageBytes: g.imageBytes),
+    ];
+    bool isSaving = false;
+    int saveProgress = 0;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          bool nameExistsInDb(String name) =>
+              name.isNotEmpty &&
+              _allFabrics.any(
+                (f) => f.name.trim().toUpperCase() == name.toUpperCase(),
+              );
+
+          bool nameExistsInBatch(int idx) {
+            final name = rows[idx].nameCtrl.text.trim().toUpperCase();
+            if (name.isEmpty) return false;
+            for (int j = 0; j < rows.length; j++) {
+              if (j != idx &&
+                  rows[j].nameCtrl.text.trim().toUpperCase() == name) {
+                return true;
+              }
+            }
+            return false;
+          }
+
+          // Auto-uncheck: empty name or DB duplicate
+          for (final row in rows) {
+            final name = row.nameCtrl.text.trim();
+            if ((name.isEmpty || nameExistsInDb(name)) && row.checked) {
+              row.checked = false;
+            }
+          }
+
+          bool rowWillSave(int i) =>
+              rows[i].checked &&
+              rows[i].nameCtrl.text.trim().isNotEmpty &&
+              !nameExistsInDb(rows[i].nameCtrl.text.trim());
+          final willSaveCount =
+              List.generate(rows.length, (i) => i).where(rowWillSave).length;
+          final cs = Theme.of(ctx).colorScheme;
+
+          return Dialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 24,
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 780,
+                maxHeight: MediaQuery.of(ctx).size.height * 0.9,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Title + live counter
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Batch AI Scan Results', // l10n: batchScanResults
+                                style: Theme.of(ctx).textTheme.titleLarge,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                isSaving
+                                    ? '正在入庫 $saveProgress / $willSaveCount …'
+                                    : '共辨識 ${rows.length} 筆，將入庫 $willSaveCount 筆',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: willSaveCount > 0
+                                      ? cs.primary
+                                      : cs.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed:
+                              isSaving ? null : () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 12),
+                  // Column headers
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(52, 0, 16, 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '名稱',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 100,
+                              child: Text(
+                                '類別',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 48,
+                              child: Text(
+                                '上架',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '顏色',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 55,
+                              child: Text(
+                                '單位',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 68,
+                              child: Text(
+                                '成本',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 68,
+                              child: Text(
+                                '零售價',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  // Editable item list
+                  Expanded(
+                    child: ListView.separated(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      itemCount: rows.length,
+                      separatorBuilder: (_, _) =>
+                          Divider(height: 1, color: cs.outlineVariant),
+                      itemBuilder: (_, i) {
+                        final row = rows[i];
+                        final name = row.nameCtrl.text.trim();
+                        final isEmpty = name.isEmpty;
+                        final dbDup = nameExistsInDb(name);
+                        final batchDup = nameExistsInBatch(i);
+
+                        return Container(
+                          color: isEmpty
+                              ? cs.errorContainer.withValues(alpha: 0.25)
+                              : null,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Checkbox pinned to top-left
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: SizedBox(
+                                  width: 40,
+                                  child: Checkbox(
+                                    value: row.checked,
+                                    onChanged: isEmpty || isSaving || dbDup
+                                        ? null
+                                        : (v) => setDialogState(
+                                              () => row.checked = v!,
+                                            ),
+                                  ),
+                                ),
+                              ),
+                              // Source image thumbnail
+                              if (row.sourceImageBytes != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    top: 6,
+                                    right: 8,
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Image.memory(
+                                      row.sourceImageBytes!,
+                                      width: 44,
+                                      height: 44,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
+                                ),
+                              // Two-row content block
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // ── Row 1: Name · Category · isOnline ──
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        // Name + dup badges
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              TextField(
+                                                controller: row.nameCtrl,
+                                                enabled: !isSaving,
+                                                onChanged: (_) =>
+                                                    setDialogState(() {}),
+                                                style: const TextStyle(
+                                                    fontSize: 13),
+                                                decoration: InputDecoration(
+                                                  isDense: true,
+                                                  contentPadding:
+                                                      const EdgeInsets
+                                                          .symmetric(
+                                                    horizontal: 8,
+                                                    vertical: 8,
+                                                  ),
+                                                  border: OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            6),
+                                                    borderSide: BorderSide(
+                                                      color: isEmpty
+                                                          ? cs.error
+                                                          : cs.outline,
+                                                    ),
+                                                  ),
+                                                  enabledBorder:
+                                                      OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            6),
+                                                    borderSide: BorderSide(
+                                                      color: isEmpty
+                                                          ? cs.error
+                                                          : cs.outline,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              if (dbDup || batchDup) ...[
+                                                const SizedBox(height: 3),
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                    horizontal: 6,
+                                                    vertical: 2,
+                                                  ),
+                                                  decoration: BoxDecoration(
+                                                    color: cs.tertiaryContainer,
+                                                    borderRadius:
+                                                        BorderRadius.circular(4),
+                                                  ),
+                                                  child: Text(
+                                                    dbDup ? '已存在' : '批次重複',
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      color:
+                                                          cs.onTertiaryContainer,
+                                                      fontWeight: FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        // Category dropdown
+                                        SizedBox(
+                                          width: 100,
+                                          child: DropdownButtonFormField<String>(
+                                            initialValue: row.category,
+                                            isDense: true,
+                                            isExpanded: true,
+                                            decoration: const InputDecoration(
+                                              isDense: true,
+                                              contentPadding:
+                                                  EdgeInsets.symmetric(
+                                                horizontal: 8,
+                                                vertical: 8,
+                                              ),
+                                              border: OutlineInputBorder(),
+                                            ),
+                                            items: validCats
+                                                .map(
+                                                  (c) => DropdownMenuItem(
+                                                    value: c,
+                                                    child: Text(
+                                                      c,
+                                                      style: const TextStyle(
+                                                          fontSize: 12),
+                                                    ),
+                                                  ),
+                                                )
+                                                .toList(),
+                                            onChanged: isSaving
+                                                ? null
+                                                : (v) => setDialogState(
+                                                      () => row.category = v!,
+                                                    ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        // isOnline toggle
+                                        SizedBox(
+                                          width: 48,
+                                          child: Switch(
+                                            value: row.isOnline,
+                                            onChanged: isSaving
+                                                ? null
+                                                : (v) => setDialogState(
+                                                      () => row.isOnline = v,
+                                                    ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    // ── Row 2: Colour · Unit · Cost · Retail ──
+                                    Row(
+                                      children: [
+                                        // Colour
+                                        Expanded(
+                                          child: TextField(
+                                            controller: row.colorCtrl,
+                                            enabled: !isSaving,
+                                            inputFormatters: [
+                                              TextInputFormatter.withFunction(
+                                                (o, n) => n.copyWith(
+                                                  text: n.text.toUpperCase(),
+                                                ),
+                                              ),
+                                            ],
+                                            style:
+                                                const TextStyle(fontSize: 12),
+                                            decoration: const InputDecoration(
+                                              isDense: true,
+                                              hintText: 'COLOUR',
+                                              hintStyle:
+                                                  TextStyle(fontSize: 11),
+                                              contentPadding:
+                                                  EdgeInsets.symmetric(
+                                                horizontal: 8,
+                                                vertical: 7,
+                                              ),
+                                              border: OutlineInputBorder(),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        // Unit
+                                        SizedBox(
+                                          width: 55,
+                                          child: TextField(
+                                            controller: row.unitCtrl,
+                                            enabled: !isSaving,
+                                            inputFormatters: [
+                                              TextInputFormatter.withFunction(
+                                                (o, n) => n.copyWith(
+                                                  text: n.text.toUpperCase(),
+                                                ),
+                                              ),
+                                            ],
+                                            style:
+                                                const TextStyle(fontSize: 12),
+                                            decoration: const InputDecoration(
+                                              isDense: true,
+                                              contentPadding:
+                                                  EdgeInsets.symmetric(
+                                                horizontal: 8,
+                                                vertical: 7,
+                                              ),
+                                              border: OutlineInputBorder(),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        // Cost
+                                        SizedBox(
+                                          width: 68,
+                                          child: TextField(
+                                            controller: row.costCtrl,
+                                            enabled: !isSaving,
+                                            keyboardType: const TextInputType
+                                                .numberWithOptions(
+                                              decimal: true,
+                                            ),
+                                            style:
+                                                const TextStyle(fontSize: 12),
+                                            decoration: const InputDecoration(
+                                              isDense: true,
+                                              contentPadding:
+                                                  EdgeInsets.symmetric(
+                                                horizontal: 8,
+                                                vertical: 7,
+                                              ),
+                                              border: OutlineInputBorder(),
+                                              prefixText: '\$ ',
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        // Retail price
+                                        SizedBox(
+                                          width: 68,
+                                          child: TextField(
+                                            controller: row.retailCtrl,
+                                            enabled: !isSaving,
+                                            keyboardType: const TextInputType
+                                                .numberWithOptions(
+                                              decimal: true,
+                                            ),
+                                            style:
+                                                const TextStyle(fontSize: 12),
+                                            decoration: const InputDecoration(
+                                              isDense: true,
+                                              contentPadding:
+                                                  EdgeInsets.symmetric(
+                                                horizontal: 8,
+                                                vertical: 7,
+                                              ),
+                                              border: OutlineInputBorder(),
+                                              prefixText: '\$ ',
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  // Footer
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      children: [
+                        TextButton(
+                          onPressed:
+                              isSaving ? null : () => Navigator.pop(ctx),
+                          child: const Text('CANCEL'),
+                        ),
+                        if (isSaving) ...[
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                LinearProgressIndicator(
+                                  value: willSaveCount > 0
+                                      ? saveProgress / willSaveCount
+                                      : null,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '正在入庫 $saveProgress / $willSaveCount',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: cs.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                        ] else
+                          const Spacer(),
+                        FilledButton.icon(
+                          icon: isSaving
+                              ? SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: cs.onPrimary,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.download_done_rounded,
+                                  size: 18,
+                                ),
+                          label: Text(
+                            isSaving
+                                ? '入庫中…'
+                                : '全部入庫 ($willSaveCount 筆)', // l10n: batchImport
+                          ),
+                          onPressed: (isSaving || willSaveCount == 0)
+                              ? null
+                              : () async {
+                                  final toSave = List.generate(
+                                    rows.length,
+                                    (i) => i,
+                                  ).where(rowWillSave).toList();
+                                  final totalToSave = toSave.length;
+                                  setDialogState(() {
+                                    isSaving = true;
+                                    saveProgress = 0;
+                                  });
+
+                                  // Upload each unique source image once,
+                                  // reusing the URL for all rows from the
+                                  // same scan image.
+                                  final Map<Uint8List, String?> imageUrlCache =
+                                      {};
+                                  for (final i in toSave) {
+                                    final bytes = rows[i].sourceImageBytes;
+                                    if (bytes != null &&
+                                        !imageUrlCache.containsKey(bytes)) {
+                                      imageUrlCache[bytes] =
+                                          await _uploadImage(bytes);
+                                    }
+                                  }
+
+                                  int saved = 0;
+                                  int failed = 0;
+
+                                  for (final i in toSave) {
+                                    try {
+                                      final imageUrl = rows[i].sourceImageBytes
+                                          != null
+                                          ? imageUrlCache[rows[i]
+                                                .sourceImageBytes]
+                                          : null;
+                                      await _dbService.addMaterial(
+                                        MaterialItem(
+                                          id: '',
+                                          name: rows[i].nameCtrl.text.trim(),
+                                          category: rows[i].category,
+                                          color: rows[i].colorCtrl.text.trim(),
+                                          costPerUnit:
+                                              double.tryParse(
+                                                rows[i].costCtrl.text,
+                                              ) ??
+                                              0,
+                                          retailPrice:
+                                              double.tryParse(
+                                                rows[i].retailCtrl.text,
+                                              ) ??
+                                              0,
+                                          unit: rows[i].unitCtrl.text
+                                                  .trim()
+                                                  .isNotEmpty
+                                              ? rows[i].unitCtrl.text.trim()
+                                              : 'm',
+                                          isOnline: rows[i].isOnline,
+                                          imageUrl: imageUrl,
+                                          stock: 0,
+                                          reorderLevel: 0,
+                                        ),
+                                      );
+                                      saved++;
+                                    } catch (e) {
+                                      debugPrint('Batch add error [$i]: $e');
+                                      failed++;
+                                    }
+                                    if (ctx.mounted) {
+                                      setDialogState(() => saveProgress++);
+                                    }
+                                  }
+
+                                  if (!ctx.mounted) return;
+                                  Navigator.pop(ctx);
+
+                                  final skipped =
+                                      rows.length - totalToSave + failed;
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          skipped > 0
+                                              ? '成功入庫 $saved 筆，跳過 $skipped 筆'
+                                              : '成功入庫 $saved 筆',
+                                        ),
+                                        backgroundColor: Theme.of(
+                                          context,
+                                        ).colorScheme.tertiary,
+                                      ),
+                                    );
+                                  }
+                                },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    ).then((_) {
+      for (final row in rows) {
+        row.nameCtrl.dispose();
+        row.colorCtrl.dispose();
+        row.costCtrl.dispose();
+        row.retailCtrl.dispose();
+        row.unitCtrl.dispose();
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(AppLocalizations.of(context).fabricTitle),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.document_scanner),
+            tooltip: 'Batch AI Scan', // l10n: batchScan
+            onPressed: _startBatchScan,
+          ),
           PopupMenuButton<bool>(
             icon: const IconText(Icons.sort_by_alpha),
             tooltip: AppLocalizations.of(context).sortOrder,

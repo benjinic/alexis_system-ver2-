@@ -72,6 +72,7 @@ class _AlexisSystemAppState extends State<AlexisSystemApp> {
         _settingsService.cardTitleColorNotifier,
         _settingsService.sidebarTextColorNotifier,
         _settingsService.localeNotifier,
+        _settingsService.themeModeNotifier,
       ]),
       builder: (context, child) {
         final accentColor = _settingsService.accentColorNotifier.value;
@@ -82,6 +83,7 @@ class _AlexisSystemAppState extends State<AlexisSystemApp> {
         final sidebarTextColor =
             _settingsService.sidebarTextColorNotifier.value;
         final locale = _settingsService.localeNotifier.value;
+        final themeMode = _settingsService.themeModeNotifier.value;
         return MaterialApp(
           title: 'Alexis Tailor System',
           debugShowCheckedModeBanner: false,
@@ -97,8 +99,21 @@ class _AlexisSystemAppState extends State<AlexisSystemApp> {
             Locale('zh', 'TW'),
             Locale('zh', 'CN'),
           ],
+          themeMode: themeMode,
 
+          // Light theme — M3 defaults seeded from user accent colour
           theme: ThemeData(
+            useMaterial3: true,
+            brightness: Brightness.light,
+            fontFamily: 'NotoSansTC',
+            fontFamilyFallback: const ['NotoSansTC'],
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: accentColor,
+              brightness: Brightness.light,
+            ),
+          ),
+
+          darkTheme: ThemeData(
             useMaterial3: true,
             brightness: Brightness.dark,
             scaffoldBackgroundColor: Colors.black,
@@ -180,32 +195,54 @@ class _AlexisSystemAppState extends State<AlexisSystemApp> {
 
           home: const AuthWrapper(),
           routes: {
-            '/dashboard': (context) => const MainLayout(
-              currentRoute: '/dashboard',
-              child: DashboardPage(),
+            '/dashboard': (context) => const _AuthGuard(
+              child: MainLayout(currentRoute: '/dashboard', child: DashboardPage()),
             ),
-            '/pos': (context) =>
-                const MainLayout(currentRoute: '/pos', child: POSPage()),
-            '/orders': (context) =>
-                const MainLayout(currentRoute: '/orders', child: OrdersPage()),
-            '/customers': (context) => const MainLayout(
-              currentRoute: '/customers',
-              child: CustomersScreen(),
+            '/pos': (context) => const _AuthGuard(
+              child: MainLayout(currentRoute: '/pos', child: POSPage()),
             ),
-            '/inventory': (context) => const MainLayout(
-              currentRoute: '/inventory',
-              child: FabricPage(),
+            '/orders': (context) => const _AuthGuard(
+              child: MainLayout(currentRoute: '/orders', child: OrdersPage()),
             ),
-            '/workshop': (context) =>
-                MainLayout(currentRoute: '/workshop', child: WorkshopPage()),
-            '/settings': (context) => const MainLayout(
-              currentRoute: '/settings',
-              child: SettingsPage(),
+            '/customers': (context) => const _AuthGuard(
+              child: MainLayout(currentRoute: '/customers', child: CustomersScreen()),
+            ),
+            '/inventory': (context) => const _AuthGuard(
+              child: MainLayout(currentRoute: '/inventory', child: FabricPage()),
+            ),
+            '/workshop': (context) => const _AuthGuard(
+              child: MainLayout(currentRoute: '/workshop', child: WorkshopPage()),
+            ),
+            '/settings': (context) => const _AuthGuard(
+              child: MainLayout(currentRoute: '/settings', child: SettingsPage()),
             ),
           },
           onUnknownRoute: (settings) =>
               MaterialPageRoute(builder: (_) => const NotFoundPage()),
         );
+      },
+    );
+  }
+}
+
+// === 路由 Auth Guard（保護具名路由）===
+class _AuthGuard extends StatelessWidget {
+  const _AuthGuard({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: Colors.black,
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasData) return child;
+        return const LoginPage();
       },
     );
   }

@@ -18,6 +18,9 @@ class WorkshopPage extends StatefulWidget {
 }
 
 class _WorkshopPageState extends State<WorkshopPage> {
+  static const double _kColumnWidth = 320.0;
+  static const double _kColumnGap = 16.0;
+
   bool _showArchived = false;
   final DatabaseService _dbService = DatabaseService();
   final TextEditingController _searchController = TextEditingController();
@@ -66,7 +69,7 @@ class _WorkshopPageState extends State<WorkshopPage> {
     // 初始捲動到指定欄位
     if (widget.initialScrollIndex > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        double offset = widget.initialScrollIndex * 336.0;
+        double offset = widget.initialScrollIndex * (_kColumnWidth + _kColumnGap);
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
             offset,
@@ -158,6 +161,7 @@ class _WorkshopPageState extends State<WorkshopPage> {
 
   Future<void> _toggleFabricOrdered(WorkshopOrder order) async {
     final nextStatus = !order.isFabricOrdered;
+    final l10n = AppLocalizations.of(context);
     try {
       if (order.orderId.trim().isNotEmpty) {
         await _dbService.updateOrderFabricRequiredItemsStatus(
@@ -169,14 +173,19 @@ class _WorkshopPageState extends State<WorkshopPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(nextStatus ? '布料已標記為已訂購' : '布料標記為未訂'),
+          content: Text(
+            nextStatus ? l10n.fabricMarkedOrdered : l10n.fabricMarkedNotOrdered,
+          ),
           duration: const Duration(seconds: 2),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('布料狀態同步失敗: $e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text(l10n.fabricSyncError('$e')),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -784,7 +793,7 @@ class _WorkshopPageState extends State<WorkshopPage> {
       builder: (context, candidateData, rejectedData) {
         final isHovering = candidateData.isNotEmpty;
         return Container(
-          width: 320,
+          width: _kColumnWidth,
           decoration: BoxDecoration(
             color: isHovering ? color[50] : Colors.grey[100],
             borderRadius: BorderRadius.circular(16),

@@ -6,6 +6,7 @@ class Customer {
   final int orders;
   final double totalSpent; // 1. 修改：改為 double 以符合資料庫的數字格式
   final DateTime? createdAt;
+  final DateTime? nextFollowUp;
   final Map<String, String>
   measurements; // 新增：體型數據 (例如: {'Shoulder': '45', 'Chest': '100'})
 
@@ -17,8 +18,15 @@ class Customer {
     required this.orders,
     required this.totalSpent,
     this.createdAt,
+    this.nextFollowUp,
     this.measurements = const {}, // 預設為空
   });
+
+  String get tier {
+    if (totalSpent >= 50000) return 'vip';
+    if (totalSpent >= 10000) return 'regular';
+    return 'new';
+  }
 
   // 2. 增加：安全的轉換邏輯
   factory Customer.fromFirestore(String id, Map<String, dynamic> data) {
@@ -52,6 +60,13 @@ class Customer {
       });
     }
 
+    DateTime? nextFollowUp;
+    try {
+      if (data['nextFollowUp'] != null) {
+        nextFollowUp = (data['nextFollowUp'] as dynamic).toDate();
+      }
+    } catch (_) {}
+
     return Customer(
       id: id,
       name: data['name']?.toString() ?? '',
@@ -62,6 +77,7 @@ class Customer {
       createdAt: data['createdAt'] != null
           ? (data['createdAt'] as dynamic).toDate()
           : null,
+      nextFollowUp: nextFollowUp,
       measurements: parsedMeasurements,
     );
   }
@@ -77,9 +93,10 @@ class Customer {
       'email': email,
       'phone': phone,
       'orders': orders,
-      'totalSpent': totalSpent, // 存入時保持為數字
+      'totalSpent': totalSpent,
       'createdAt': createdAt,
-      'measurements': measurements, // 寫入資料庫
+      'measurements': measurements,
+      if (nextFollowUp != null) 'nextFollowUp': nextFollowUp,
     };
   }
 
@@ -93,7 +110,8 @@ class Customer {
     int? orders,
     double? totalSpent,
     DateTime? createdAt,
-    Map<String, String>? measurements, // 新增 copyWith 參數
+    DateTime? nextFollowUp,
+    Map<String, String>? measurements,
   }) {
     return Customer(
       id: id ?? this.id,
@@ -103,6 +121,7 @@ class Customer {
       orders: orders ?? this.orders,
       totalSpent: totalSpent ?? this.totalSpent,
       createdAt: createdAt ?? this.createdAt,
+      nextFollowUp: nextFollowUp ?? this.nextFollowUp,
       measurements: measurements ?? this.measurements,
     );
   }
