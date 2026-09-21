@@ -2,8 +2,10 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    function signedIn() {
-      return request.auth != null;
+    // 員工 = 登入且 uid 在 Firestore staff 名單內（見 firestore.rules）。
+    function isStaff() {
+      return request.auth != null &&
+        firestore.exists(/databases/(default)/documents/staff/$(request.auth.uid));
     }
 
     function validImageUpload() {
@@ -21,19 +23,19 @@ service firebase.storage {
     }
 
     match /order_images/{orderId}/{fileName} {
-      allow read: if signedIn();
-      allow create, update: if signedIn() &&
+      allow read: if isStaff();
+      allow create, update: if isStaff() &&
         validImageUpload() &&
         validImageFileName(fileName);
-      allow delete: if signedIn();
+      allow delete: if isStaff();
     }
 
     match /fabric_images/{fileName} {
-      allow read: if signedIn();
-      allow create, update: if signedIn() &&
+      allow read: if isStaff();
+      allow create, update: if isStaff() &&
         validImageUpload() &&
         validImageFileName(fileName);
-      allow delete: if signedIn();
+      allow delete: if isStaff();
     }
 
     match /{allPaths=**} {

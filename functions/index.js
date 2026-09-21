@@ -39,6 +39,17 @@ async function verifyFirebaseUser(req, res) {
   }
 }
 
+// 只有 staff/{uid} 名單內的帳號才算員工。名單只能由後端（Admin SDK）或
+// Firebase Console 寫入，Firestore 規則不允許 client 寫入 staff collection。
+async function verifyStaff(user, res) {
+  const snapshot = await db.collection('staff').doc(user.uid).get();
+  if (!snapshot.exists) {
+    res.status(403).json({ error: 'This account is not authorized.' });
+    return false;
+  }
+  return true;
+}
+
 async function verifyAppCheck(req, res) {
   const appCheckToken = req.get('X-Firebase-AppCheck') || '';
   if (!appCheckToken) {
@@ -61,6 +72,8 @@ async function verifyRequest(req, res, {
 }) {
   const user = await verifyFirebaseUser(req, res);
   if (!user) return null;
+
+  if (!(await verifyStaff(user, res))) return null;
 
   let app = null;
   if (requireAppCheck) {
@@ -296,6 +309,78 @@ async function recomputeCustomerAggregate(customerId) {
   }
 }
 
+const STAFF_CREATE_RATE_LIMIT_PER_MINUTE = 10;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// 由現有員工建立新員工帳號：建立 Auth 使用者並加入 staff 名單。
+// 取代原本 client 端 createUserWithEmailAndPassword，讓 Firebase Auth 可以關閉自行註冊。
+exports.createStaffAccount = onRequest(
+  { region: HTTP_REGION, cors: true },
+  async (req, res) => {
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method Not Allowed' });
+      return;
+    }
+
+    const verified = await verifyRequest(req, res, {
+      limitPerMinute: STAFF_CREATE_RATE_LIMIT_PER_MINUTE,
+      rateLimitName: 'createStaffAccount',
+      requireAppCheck: false,
+    });
+    if (!verified) return;
+
+    const email = String(req.body?.email || '').trim();
+    const password = String(req.body?.password || '');
+    if (!EMAIL_PATTERN.test(email)) {
+      res.status(400).json({ code: 'invalid-email', error: 'Invalid email.' });
+      return;
+    }
+    if (password.length < 6) {
+      res.status(400).json({ code: 'weak-password', error: 'Password too short.' });
+      return;
+    }
+
+    let created;
+    try {
+      created = await getAuth().createUser({ email, password });
+    } catch (error) {
+      const code = error.code || '';
+      if (code === 'auth/email-already-exists') {
+        res.status(409).json({ code: 'email-already-in-use', error: 'Email already in use.' });
+      } else if (code === 'auth/invalid-email') {
+        res.status(400).json({ code: 'invalid-email', error: 'Invalid email.' });
+      } else if (code === 'auth/invalid-password') {
+        res.status(400).json({ code: 'weak-password', error: 'Invalid password.' });
+      } else {
+        console.error('createStaffAccount failed', error);
+        res.status(500).json({ error: 'Failed to create account.' });
+      }
+      return;
+    }
+
+    try {
+      await db.collection('staff').doc(created.uid).set({
+        email,
+        createdBy: verified.user.uid,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (error) {
+      // 避免留下沒有名單資料的孤立帳號
+      console.error('createStaffAccount staff write failed', error);
+      await getAuth().deleteUser(created.uid).catch(() => {});
+      res.status(500).json({ error: 'Failed to create account.' });
+      return;
+    }
+
+    res.json({ uid: created.uid, email });
+  }
+);
+
 exports.allocateOrderId = onRequest(
   { region: HTTP_REGION, cors: true },
   async (req, res) => {
@@ -406,6 +491,8 @@ exports.geminiProxy = onRequest(
     } catch (error) {
       const status = error.response?.status || 500;
       const data = error.response?.data || { error: error.message };
+      // 記錄 Gemini 上游的狀態碼與錯誤內容（不含 request body / API key）
+      console.error(`geminiProxy upstream error ${status}: ${JSON.stringify(data)}`);
       res.status(status).json(data);
     }
   }

@@ -1,8 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null;
+    // 員工 = 登入且 uid 在 staff 名單內。staff 只能由後端 / Console 寫入。
+    // 不能只檢查 request.auth != null：匿名或自行註冊的帳號也會通過。
+    function isStaff() {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/staff/$(request.auth.uid));
     }
 
     function hasOnlyFields(fields) {
@@ -74,7 +77,6 @@ service cloud.firestore {
         'itemSummary',
         'fabricSummary',
         'materialCost',
-        'laborCost',
         'outsourcingCost',
         'totalCost',
         'totalProfit',
@@ -95,13 +97,16 @@ service cloud.firestore {
         'balancePaymentMethod',
         'balancePaidDate',
         'balance',
+        'payments',
+        'laborCost',
         'fixedCost',
         'status',
         'paymentMethod',
         'createdAt',
         'updatedAt',
         'date',
-        'deliveryDate'
+        'deliveryDate',
+        'notes'
       ];
     }
 
@@ -125,6 +130,7 @@ service cloud.firestore {
           'balancePaymentMethod',
           'balancePaidDate',
           'balance',
+          'payments',
           'materialCost',
           'laborCost',
           'outsourcingCost',
@@ -137,7 +143,8 @@ service cloud.firestore {
           'updatedAt',
           'date',
           'deliveryDate',
-          'isFabricOrdered'
+          'isFabricOrdered',
+          'notes'
         ]) &&
         hasRequiredFields([
           'uniqueId',
@@ -176,7 +183,9 @@ service cloud.firestore {
         optionalTimestampOrInt('updatedAt') &&
         optionalTimestampOrInt('date') &&
         optionalTimestampOrInt('deliveryDate') &&
-        optionalBool('isFabricOrdered');
+        optionalBool('isFabricOrdered') &&
+        optionalList('payments') &&
+        optionalString('notes');
     }
 
     function validOrderItem() {
@@ -287,7 +296,8 @@ service cloud.firestore {
           'orders',
           'totalSpent',
           'createdAt',
-          'measurements'
+          'measurements',
+          'nextFollowUp'
         ]) &&
         hasRequiredFields(['name', 'email', 'phone', 'orders', 'totalSpent']) &&
         stringField('name') &&
@@ -296,7 +306,8 @@ service cloud.firestore {
         intField('orders') &&
         numberField('totalSpent') &&
         optionalTimestampOrInt('createdAt') &&
-        optionalMap('measurements');
+        optionalMap('measurements') &&
+        optionalTimestampOrInt('nextFollowUp');
     }
 
     function validService() {
@@ -330,6 +341,15 @@ service cloud.firestore {
         optionalTimestampOrInt('uploadedAt');
     }
 
+    function validContactLog() {
+      return hasOnlyFields(['type', 'notes', 'createdAt', 'followUpDate']) &&
+        hasRequiredFields(['type', 'notes', 'createdAt']) &&
+        stringField('type') &&
+        stringField('notes') &&
+        request.resource.data.type in ['call', 'fitting', 'message', 'note'] &&
+        optionalTimestampOrInt('followUpDate');
+    }
+
     function validSetting(settingId) {
       return settingId == 'measurements' &&
           hasOnlyFields(['fields']) &&
@@ -337,64 +357,92 @@ service cloud.firestore {
     }
 
     match /orders/{orderId} {
-      allow read: if signedIn();
-      allow create: if signedIn() && validOrder() && noSensitiveOrderAggregates();
-      allow update: if signedIn() && validOrderClientUpdate();
-      allow delete: if signedIn();
+      allow read: if isStaff();
+      allow create: if isStaff() && validOrder() && noSensitiveOrderAggregates();
+      allow update: if isStaff() && validOrderClientUpdate();
+      allow delete: if isStaff();
     }
 
     match /order_items/{itemId} {
-      allow read: if signedIn();
-      allow create, update: if signedIn() && validOrderItem();
-      allow delete: if signedIn();
+      allow read: if isStaff();
+      allow create, update: if isStaff() && validOrderItem();
+      allow delete: if isStaff();
     }
 
     match /inventory/{itemId} {
-      allow read: if signedIn();
-      allow create, update: if signedIn() && validInventoryItem();
-      allow delete: if signedIn();
+      allow read: if isStaff();
+      allow create, update: if isStaff() && validInventoryItem();
+      allow delete: if isStaff();
     }
 
     match /workshop_orders/{workshopOrderId} {
-      allow read: if signedIn();
-      allow create: if signedIn() &&
+      allow read: if isStaff();
+      allow create: if isStaff() &&
         validWorkshopOrder() &&
         (!(request.resource.data.isFabricOrdered == true));
-      allow update: if signedIn() &&
+      allow update: if isStaff() &&
         validWorkshopOrder() &&
         fieldUnchanged('isFabricOrdered');
-      allow delete: if signedIn();
+      allow delete: if isStaff();
     }
 
     match /customers/{customerId} {
-      allow read: if signedIn();
-      allow create: if signedIn() &&
+      allow read: if isStaff();
+      allow create: if isStaff() &&
         validCustomer() &&
         request.resource.data.orders == 0 &&
         request.resource.data.totalSpent == 0;
-      allow update: if signedIn() &&
+      allow update: if isStaff() &&
         validCustomer() &&
         fieldUnchanged('orders') &&
         fieldUnchanged('totalSpent');
-      allow delete: if signedIn();
+      allow delete: if isStaff();
+
+      match /contact_logs/{logId} {
+        allow read: if isStaff();
+        allow create: if isStaff() && validContactLog();
+        allow delete: if isStaff();
+      }
     }
 
     match /services/{serviceId} {
-      allow read: if signedIn();
-      allow create, update: if signedIn() && validService();
-      allow delete: if signedIn();
+      allow read: if isStaff();
+      allow create, update: if isStaff() && validService();
+      allow delete: if isStaff();
     }
 
     match /order_images/{imageId} {
-      allow read: if signedIn();
-      allow create, update: if signedIn() && validOrderImage();
-      allow delete: if signedIn();
+      allow read: if isStaff();
+      allow create, update: if isStaff() && validOrderImage();
+      allow delete: if isStaff();
+    }
+
+    // 訂製訂單：Alexis Bespoke App 只能建立同讀取，建立後內容唔可修改或刪除。
+    // 唯一容許嘅更新係 POS 匯入時回寫 posOrderId / posOrderNo / importedAt，
+    // 而且只限未匯入嘅訂單（防止重複匯入或覆寫關聯）。
+    match /bespoke_orders/{orderId} {
+      allow read: if isStaff();
+      allow create: if isStaff() &&
+        !request.resource.data.keys().hasAny(['posOrderId', 'posOrderNo', 'importedAt']);
+      allow update: if isStaff() &&
+        resource.data.get('posOrderId', '') == '' &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['posOrderId', 'posOrderNo', 'importedAt']) &&
+        request.resource.data.posOrderId is string &&
+        request.resource.data.posOrderId != '';
+      allow delete: if false;
     }
 
     match /settings/{settingId} {
-      allow read: if signedIn() && settingId in ['order_counter', 'measurements'];
-      allow create, update: if signedIn() && validSetting(settingId);
+      allow read: if isStaff() && settingId in ['order_counter', 'measurements'];
+      allow create, update: if isStaff() && validSetting(settingId);
       allow delete: if false;
+    }
+
+    // 員工名單：使用者只能讀取自己的那筆（用來判斷是否有權限），任何 client 都不可寫入。
+    match /staff/{uid} {
+      allow get: if request.auth != null && request.auth.uid == uid;
+      allow list, write: if false;
     }
 
     match /{document=**} {
