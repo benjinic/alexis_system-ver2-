@@ -69,4 +69,18 @@ void main() {
     );
     expect(s.garmentLabels, '外套 · 恤衫');
   });
+
+  test('notes number several pieces of the same garment type', () {
+    final text = summary(
+      items: [
+        {'type': 'jacket', 'fabric': 'Navy'},
+        {'type': 'trousers', 'fabric': 'Navy'},
+        {'type': 'jacket', 'fabric': 'Grey'},
+      ],
+    ).toNotesText();
+    expect(text, contains('外套 1｜布料：Navy'));
+    expect(text, contains('外套 2｜布料：Grey'));
+    expect(text, contains('褲子｜布料：Navy'));
+    expect(text, isNot(contains('褲子 1')));
+  });
 }

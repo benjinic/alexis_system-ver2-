@@ -75,9 +75,19 @@ class BespokeOrderSummary {
   String toNotesText() {
     final lines = <String>['[Bespoke 訂製]'];
     if (phone.isNotEmpty) lines.add('電話：$phone');
+    final typeTotals = <String, int>{};
+    for (final item in items) {
+      final ty = (item['type'] ?? '').toString();
+      typeTotals[ty] = (typeTotals[ty] ?? 0) + 1;
+    }
+    final typeSeen = <String, int>{};
     for (final item in items) {
       final type = (item['type'] ?? '').toString();
-      final buf = StringBuffer(_garmentZh[type] ?? type);
+      final seq = typeSeen[type] = (typeSeen[type] ?? 0) + 1;
+      // 同類型多件（例如兩件外套）加序號，備注入面先分得清邊件係邊件。
+      final buf = StringBuffer(
+        '${_garmentZh[type] ?? type}${(typeTotals[type] ?? 0) > 1 ? ' $seq' : ''}',
+      );
       final fabric = (item['fabric'] ?? '').toString();
       final swatch = (item['fabricSwatch'] ?? '').toString();
       if (fabric.isNotEmpty) {
