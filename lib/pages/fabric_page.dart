@@ -8,6 +8,25 @@ import '../models/material_item.dart';
 import '../services/ai_fabric_scan_service.dart';
 import '../services/database_service.dart';
 
+/// 由檔案開頭位元組判斷圖片格式；Storage 規則只接受 jpeg/png/webp，
+/// 其他格式返回 null（唔再一律標成 jpeg）。
+({String contentType, String ext})? detectImageType(Uint8List b) {
+  if (b.length >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) {
+    return (contentType: 'image/jpeg', ext: 'jpg');
+  }
+  if (b.length >= 8 &&
+      b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) {
+    return (contentType: 'image/png', ext: 'png');
+  }
+  if (b.length >= 12 &&
+      String.fromCharCodes(b.sublist(0, 4)) == 'RIFF' &&
+      String.fromCharCodes(b.sublist(8, 12)) == 'WEBP') {
+    return (contentType: 'image/webp', ext: 'webp');
+  }
+  return null;
+}
+
+
 class FabricPage extends StatefulWidget {
   const FabricPage({super.key});
 
@@ -314,13 +333,19 @@ class _FabricPageState extends State<FabricPage>
 
   Future<String?> _uploadImage(Uint8List fileData) async {
     try {
-      final String fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final type = detectImageType(fileData);
+      if (type == null) {
+        debugPrint('Unsupported image format, upload skipped');
+        return null;
+      }
+      final String fileName =
+          '${DateTime.now().millisecondsSinceEpoch}.${type.ext}';
       final Reference storageRef = FirebaseStorage.instance
           .ref()
           .child('fabric_images')
           .child(fileName);
       final SettableMetadata metadata = SettableMetadata(
-        contentType: 'image/jpeg',
+        contentType: type.contentType,
       );
       final UploadTask uploadTask = storageRef.putData(fileData, metadata);
       final TaskSnapshot snapshot = await uploadTask;
