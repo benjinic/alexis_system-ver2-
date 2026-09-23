@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../services/database_service.dart';
+import 'fabric_page.dart' show detectImageType;
 
 class OrderImagesPage extends StatelessWidget {
   final String orderId;
@@ -81,8 +82,12 @@ class _OrderImagesBodyState extends State<_OrderImagesBody> {
       for (var i = 0; i < picked.length; i++) {
         final file = picked[i];
         final Uint8List bytes = await file.readAsBytes();
+        final type = detectImageType(bytes);
+        if (type == null) {
+          throw '${file.name}: unsupported format (use JPEG, PNG or WebP)';
+        }
         final fileName =
-            'order_${widget.orderId}_${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
+            'order_${widget.orderId}_${DateTime.now().millisecondsSinceEpoch}_$i.${type.ext}';
         final ref = FirebaseStorage.instance
             .ref()
             .child('order_images')
@@ -91,7 +96,7 @@ class _OrderImagesBodyState extends State<_OrderImagesBody> {
 
         final task = ref.putData(
           bytes,
-          SettableMetadata(contentType: 'image/jpeg'),
+          SettableMetadata(contentType: type.contentType),
         );
 
         task.snapshotEvents.listen((snapshot) {
