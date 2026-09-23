@@ -140,6 +140,69 @@ void main() {
     });
   });
 
+  group('resolveChosenService', () {
+    test('matches by serviceId first', () {
+      final s = resolveChosenService({'serviceId': 'Shirt', 'serviceName': 'Suit'}, services);
+      expect(s?.name, 'Shirt');
+    });
+
+    test('falls back to serviceName when id is missing or unmatched', () {
+      expect(resolveChosenService({'serviceName': 'Pants'}, services)?.name, 'Pants');
+      expect(resolveChosenService({'serviceId': 'zzz', 'serviceName': 'Pants'}, services)?.name,
+          'Pants');
+    });
+
+    test('returns null when neither is set or matched', () {
+      expect(resolveChosenService({}, services), isNull);
+      expect(resolveChosenService({'serviceName': 'Unknown'}, services), isNull);
+    });
+  });
+
+  group('buildPrefillItem honours a service chosen in Bespoke', () {
+    final inventory = [fabric('a1', 'WHITE PIMA', 100)];
+
+    test('uses the chosen service and its price over the guessed one', () {
+      final item = buildPrefillItem(
+        id: '1',
+        bespokeItem: {
+          'type': 'jacket', // would normally guess Suit
+          'serviceId': 'Shirt',
+          'fabricId': 'a1',
+        },
+        services: services,
+        inventory: inventory,
+      );
+      expect(item.service, 'Shirt');
+      expect(item.price, 800);
+      expect(item.fabricUsed, 2); // Shirt's default usage
+    });
+
+    test('uses the Bespoke-recorded fabric usage over the service default', () {
+      final item = buildPrefillItem(
+        id: '1',
+        bespokeItem: {
+          'type': 'jacket',
+          'serviceId': 'Suit',
+          'fabricId': 'a1',
+          'fabricUsage': 4.5,
+        },
+        services: services,
+        inventory: inventory,
+      );
+      expect(item.fabricUsed, 4.5);
+    });
+
+    test('a zero or missing Bespoke usage falls back to the service default', () {
+      final item = buildPrefillItem(
+        id: '1',
+        bespokeItem: {'type': 'jacket', 'serviceId': 'Suit', 'fabricId': 'a1', 'fabricUsage': 0},
+        services: services,
+        inventory: inventory,
+      );
+      expect(item.fabricUsed, 3); // Suit's default usage
+    });
+  });
+
   group('describeBespokeItem', () {
     final inventory = [fabric('a1', 'WHITE PIMA', 100)];
 

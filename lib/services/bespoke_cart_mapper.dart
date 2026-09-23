@@ -36,6 +36,28 @@ ServiceItem? guessService(String garmentType, List<ServiceItem> services) {
   return null;
 }
 
+/// Bespoke 建單時職員已經揀低嘅 POS 服務：先用 serviceId 對返（最準），
+/// 冇 id 就退用 serviceName 比對；兩者都冇或者搵唔到就返回 null，
+/// 由 [guessService] 再猜。
+ServiceItem? resolveChosenService(
+  Map<String, dynamic> bespokeItem,
+  List<ServiceItem> services,
+) {
+  final id = (bespokeItem['serviceId'] ?? '').toString();
+  if (id.isNotEmpty) {
+    for (final s in services) {
+      if (s.id == id) return s;
+    }
+  }
+  final name = (bespokeItem['serviceName'] ?? '').toString().trim();
+  if (name.isNotEmpty) {
+    for (final s in services) {
+      if (s.name == name) return s;
+    }
+  }
+  return null;
+}
+
 /// 由庫存搵返訂製項目用嘅布料：先用 fabricId，再用名稱（不分大細楷）完全相同。
 MaterialItem? findFabric(
   String fabricId,
@@ -58,9 +80,11 @@ MaterialItem? findFabric(
 
 /// 組出傳畀 OrderItemDialog(existingItem:, asNewItem: true) 嘅預填項目。
 ///
-/// - 服務：猜到就預填，猜唔到 service 留空，職員喺視窗自己揀。
-/// - 布料：只喺猜到服務、服務預設用量 > 0 而且庫存搵到布料時預填
-///   （同 OrderItemDialog 一致：預設用量 0 嘅服務唔用布料）。
+/// - 服務：Bespoke 建單時職員已揀低就用返個服務（[resolveChosenService]）；
+///   冇揀就退用關鍵字猜（[guessService]）；兩者都搵唔到就留空，職員自己揀。
+/// - 布料：只喺服務用布（預設用量 > 0）而且庫存搵到布料時預填
+///   （同 OrderItemDialog 一致：唔用布嘅服務唔預填布料）。
+/// - 用量：Bespoke 記低嘅用量 > 0 就用返個數；否則退用服務預設用量。
 /// - 單價：預設為服務價，之後喺視窗改；未揀服務時為 0。
 /// - 數量 1、預設送工房。
 OrderItem buildPrefillItem({
@@ -70,7 +94,8 @@ OrderItem buildPrefillItem({
   required List<MaterialItem> inventory,
 }) {
   final type = (bespokeItem['type'] ?? '').toString();
-  final service = guessService(type, services);
+  final service =
+      resolveChosenService(bespokeItem, services) ?? guessService(type, services);
   final usesFabric = service != null && service.defaultFabricUsage > 0;
   final fabric = usesFabric
       ? findFabric(
@@ -79,6 +104,12 @@ OrderItem buildPrefillItem({
           inventory,
         )
       : null;
+  final bespokeUsage = bespokeItem['fabricUsage'];
+  final usage = usesFabric
+      ? ((bespokeUsage is num && bespokeUsage > 0)
+          ? bespokeUsage.toDouble()
+          : service.defaultFabricUsage)
+      : 0.0;
 
   return OrderItem(
     id: id,
@@ -87,7 +118,7 @@ OrderItem buildPrefillItem({
     quantity: 1,
     fabricId: fabric?.id,
     fabricName: fabric?.name,
-    fabricUsed: usesFabric ? service.defaultFabricUsage : 0,
+    fabricUsed: usage,
   );
 }
 
@@ -107,8 +138,11 @@ String describeBespokeItem(
     inventory,
   );
 
+  final hasChosenService =
+      (bespokeItem['serviceId'] ?? bespokeItem['serviceName'] ?? '').toString().isNotEmpty;
   final lines = <String>[
-    '匯入自 Bespoke：${_garmentZh[type] ?? type}（${index + 1}/$total）',
+    '匯入自 Bespoke：${_garmentZh[type] ?? type}（${index + 1}/$total）'
+        '${hasChosenService ? '　已在 Bespoke 選定服務' : ''}',
   ];
   if (fabricText.isEmpty) {
     lines.add('布料：未填寫');
