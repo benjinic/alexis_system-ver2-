@@ -417,7 +417,7 @@ service cloud.firestore {
       allow delete: if isStaff();
     }
 
-    // 訂製訂單：Alexis Bespoke App 只能建立同讀取，建立後內容唔可修改或刪除。
+    // 訂製訂單：Alexis Bespoke App 可以建立、讀取，同刪除未匯入嘅訂單；建立後內容唔可修改。
     // 唯一容許嘅更新係 POS 匯入時回寫 posOrderId / posOrderNo / importedAt，
     // 而且只限未匯入嘅訂單（防止重複匯入或覆寫關聯）。
     match /bespoke_orders/{orderId} {
@@ -430,7 +430,9 @@ service cloud.firestore {
           .hasOnly(['posOrderId', 'posOrderNo', 'importedAt']) &&
         request.resource.data.posOrderId is string &&
         request.resource.data.posOrderId != '';
-      allow delete: if false;
+      // 只容許員工刪除「未匯入 POS」嘅訂單（例如建錯單）；已匯入嘅唔可以刪，避免 POS 訂單失去對應。
+      allow delete: if isStaff() &&
+        resource.data.get('posOrderId', '') == '';
     }
 
     match /settings/{settingId} {
