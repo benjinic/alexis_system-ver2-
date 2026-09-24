@@ -417,24 +417,31 @@ service cloud.firestore {
       allow delete: if isStaff();
     }
 
-    // 訂製訂單：Alexis Bespoke App 可以建立、讀取，同編輯／刪除未匯入嘅訂單；
-    // 已匯入 POS 嘅訂單內容唔可再修改或刪除，避免同 POS 那邊失去對應。
+    // 訂製訂單：Alexis Bespoke App 可以建立、讀取；未匯入時可以編輯／刪除；
+    // 已匯入 POS 之後內容一律唔可再刪除，但仍然可以改 items 入面嘅款式（設計選項／
+    // 其他備注）——布料／服務／用量／客人／尺寸已經同步咗去 POS，唔會經呢度再改。
     match /bespoke_orders/{orderId} {
       allow read: if isStaff();
       allow create: if isStaff() &&
         !request.resource.data.keys().hasAny(['posOrderId', 'posOrderNo', 'importedAt']);
-      // 兩種情況先准更新，兩種都要求訂單本身仲未匯入（posOrderId 為空）：
-      //   1. POS 匯入：只准寫 posOrderId / posOrderNo / importedAt 呢三個欄位。
-      //   2. 職員編輯訂單內容：唔可以掂呢三個 POS 專用欄位（保持未匯入狀態）。
+      // 三種情況先准更新：
+      //   1. POS 匯入：訂單仲未匯入，只准寫 posOrderId / posOrderNo / importedAt 呢三個欄位。
+      //   2. 職員編輯訂單內容：訂單仲未匯入，可以改除呢三個 POS 專用欄位以外嘅任何內容。
+      //   3. 職員改已匯入訂單嘅款式：淨係准掂 items 一個欄位，價錢/客人/日期/POS
+      //      關聯等一律唔可以改；items 入面實際上改咗邊啲子欄位由 App 自己負責
+      //      （只有員工先可以寫，同其餘寫入操作嘅信任程度一致）。
       allow update: if isStaff() &&
-        resource.data.get('posOrderId', '') == '' &&
         (
-          (request.resource.data.diff(resource.data).affectedKeys()
+          (resource.data.get('posOrderId', '') == '' &&
+           request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['posOrderId', 'posOrderNo', 'importedAt']) &&
            request.resource.data.posOrderId is string &&
            request.resource.data.posOrderId != '') ||
-          !request.resource.data.diff(resource.data).affectedKeys()
-             .hasAny(['posOrderId', 'posOrderNo', 'importedAt'])
+          (resource.data.get('posOrderId', '') == '' &&
+           !request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['posOrderId', 'posOrderNo', 'importedAt'])) ||
+          (resource.data.get('posOrderId', '') != '' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['items']))
         );
       // 只容許員工刪除「未匯入 POS」嘅訂單（例如建錯單）；已匯入嘅唔可以刪，避免 POS 訂單失去對應。
       allow delete: if isStaff() &&
