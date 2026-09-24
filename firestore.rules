@@ -417,19 +417,25 @@ service cloud.firestore {
       allow delete: if isStaff();
     }
 
-    // 訂製訂單：Alexis Bespoke App 可以建立、讀取，同刪除未匯入嘅訂單；建立後內容唔可修改。
-    // 唯一容許嘅更新係 POS 匯入時回寫 posOrderId / posOrderNo / importedAt，
-    // 而且只限未匯入嘅訂單（防止重複匯入或覆寫關聯）。
+    // 訂製訂單：Alexis Bespoke App 可以建立、讀取，同編輯／刪除未匯入嘅訂單；
+    // 已匯入 POS 嘅訂單內容唔可再修改或刪除，避免同 POS 那邊失去對應。
     match /bespoke_orders/{orderId} {
       allow read: if isStaff();
       allow create: if isStaff() &&
         !request.resource.data.keys().hasAny(['posOrderId', 'posOrderNo', 'importedAt']);
+      // 兩種情況先准更新，兩種都要求訂單本身仲未匯入（posOrderId 為空）：
+      //   1. POS 匯入：只准寫 posOrderId / posOrderNo / importedAt 呢三個欄位。
+      //   2. 職員編輯訂單內容：唔可以掂呢三個 POS 專用欄位（保持未匯入狀態）。
       allow update: if isStaff() &&
         resource.data.get('posOrderId', '') == '' &&
-        request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['posOrderId', 'posOrderNo', 'importedAt']) &&
-        request.resource.data.posOrderId is string &&
-        request.resource.data.posOrderId != '';
+        (
+          (request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['posOrderId', 'posOrderNo', 'importedAt']) &&
+           request.resource.data.posOrderId is string &&
+           request.resource.data.posOrderId != '') ||
+          !request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['posOrderId', 'posOrderNo', 'importedAt'])
+        );
       // 只容許員工刪除「未匯入 POS」嘅訂單（例如建錯單）；已匯入嘅唔可以刪，避免 POS 訂單失去對應。
       allow delete: if isStaff() &&
         resource.data.get('posOrderId', '') == '';
