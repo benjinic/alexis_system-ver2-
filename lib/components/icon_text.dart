@@ -122,34 +122,32 @@ class IconText extends StatelessWidget {
   final bool applyTextScaling;
   final BlendMode? blendMode;
 
-  String _resolveLabel() {
+  /// 讀屏幕輔助工具用嘅描述；冇明確 semanticLabel 就用返 _materialIconLabels
+  /// 嘅中文名（去掉方括號）。呢個 map 之前係用嚟直接顯示做文字替代圖示，
+  /// 而家 MaterialIcons 字型已經確認打包正常，改返用 Icon 顯示真正嘅圖示，
+  /// map 就轉做輔助工具嘅描述文字，冇資料再浪費。
+  String? _resolveSemanticLabel() {
     if (semanticLabel != null && semanticLabel!.trim().isNotEmpty) {
-      return semanticLabel!;
+      return semanticLabel;
     }
-
-    final mapped = _materialIconLabels[icon];
-    if (mapped != null) {
-      return mapped;
-    }
-
-    return '[圖示]';
+    return _materialIconLabels[icon]?.replaceAll(RegExp(r'^\[|\]$'), '');
   }
 
   @override
   Widget build(BuildContext context) {
-    final label = _resolveLabel();
-
-    return Text(
-      label,
+    return Icon(
+      icon,
+      size: size,
+      fill: fill,
+      weight: weight,
+      grade: grade,
+      opticalSize: opticalSize,
+      color: color,
+      shadows: shadows,
+      semanticLabel: _resolveSemanticLabel(),
       textDirection: textDirection,
-      textScaler: applyTextScaling
-          ? MediaQuery.textScalerOf(context)
-          : TextScaler.noScaling,
-      style: TextStyle(
-        fontSize: size ?? 12,
-        color: color ?? Theme.of(context).colorScheme.onSurface,
-        shadows: shadows,
-      ),
+      applyTextScaling: applyTextScaling,
+      blendMode: blendMode,
     );
   }
 }
