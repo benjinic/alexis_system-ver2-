@@ -354,6 +354,7 @@ curl -s https://alexis-tailor-system-2025.web.app/assets/FontManifest.json
 5. **確認建立**：按「建立訂單」完成
 
 > 布料欄位支援以布料庫存 ID 搜尋，選中後自動填入成本計算。
+> 也可以從 Bespoke 匯入訂製訂單，見下方「訂製訂單（Bespoke）」。
 
 ---
 
@@ -431,8 +432,26 @@ curl -s https://alexis-tailor-system-2025.web.app/assets/FontManifest.json
 
 ### 訂製訂單（Bespoke）
 
-訂製西裝訂單功能已拆出為獨立 Flutter App：`../alexis_bespoke`（與本系統共用同一個 Firebase 專案與登入帳號）。
+訂製西裝訂單功能已拆出為獨立 Flutter App：`../alexis_bespoke`（https://alexis-bespoke.web.app，GitHub：`benjinic/Alexis_bespoke_form`），與本系統共用同一個 Firebase 專案與登入帳號。
 本系統不再包含 Bespoke 頁面與導覽入口，但 Firestore collection `bespoke_orders` 的安全規則仍保留在本專案的 `firestore.rules`（同一個 Firebase 專案共用一份規則）。
+
+**分工**：Bespoke 只負責建立訂製訂單並上傳（沒有單號、不計價）；正式訂單、單號、價錢、成本、庫存扣減全部由本系統 POS 處理。
+
+**從 Bespoke 匯入（POS 頁右上角「從 Bespoke 匯入」）**
+
+1. 選擇一張「待匯入」的 Bespoke 訂單。
+2. 客人：優先用訂單記錄的 `customerId` 對回同一位客人，找不到才用電話、姓名比對；再找不到就照舊建立新客人。
+3. 訂金、交貨日、備注（電話、每件衣服的布料與設計規格）預填到 POS；同款多件會在備注加序號（例如「外套 1」「外套 2」）。
+4. **每件衣服各開一次原本的「新增項目」視窗**（`OrderItemDialog`），已預填服務、價錢、布料、用量；計價與成本只由這個視窗處理，Bespoke 不重複實作。服務優先用 Bespoke 已選的（`serviceId`，其次 `serviceName`），沒選才依衣服類型關鍵字猜。按取消會略過該件。
+5. 儲存時由 Cloud Function `allocateOrderId` 分配最新單號，並回寫 `posOrderId` / `posOrderNo` / `importedAt` 到該張 `bespoke_orders`。
+
+**`bespoke_orders` 安全規則**（`firestore.rules`）
+
+- 讀取：員工。建立：員工，且不能預先帶 `posOrderId`、`posOrderNo`、`importedAt`。
+- 更新有三種情況：① POS 匯入（訂單未匯入時，只寫上述三個欄位）；② 員工編輯訂單內容（訂單未匯入時，不可碰上述三個欄位）；③ 已匯入後員工只可改 `items`（Bespoke 的「編輯款式」用），其餘欄位不可再改。
+- 刪除：只限未匯入（`posOrderId` 為空）的訂單。
+
+**同步注意**：`lib/services/bespoke_import_service.dart` 內有一份設計欄位的中文標籤對照表，與 Bespoke 的 `lib/models/tailor_design_options.dart` 對應，修改款式選項時兩邊都要更新。相關程式：`lib/services/bespoke_cart_mapper.dart`（預填邏輯）、`lib/pages/pos_page.dart` 的 `_importFromBespoke()`。
 
 ---
 
@@ -540,3 +559,11 @@ curl -s https://alexis-tailor-system-2025.web.app/assets/FontManifest.json
 - 核對表每行顯示來源圖縮圖（44×44 px）供對照
 - 「全部入庫」前先對每個不同來源圖上傳一次（`imageUrlCache` Map 去重），避免同一張圖重複上傳
 - 每筆布料的 `MaterialItem.imageUrl` 自動填入對應上傳 URL
+
+### 2026-09-24 ~ 26（Bespoke 整合）
+
+- POS 新增「從 Bespoke 匯入」：逐件開原本的新增項目視窗預填，同款多件備注加序號。
+- `firestore.rules`：`bespoke_orders` 更新規則分三種情況（POS 匯入／未匯入時員工編輯／已匯入後只改 `items`），刪除限未匯入。
+- 布料與訂單圖片上傳依實際檔案內容判斷格式（JPEG／PNG／WebP），不再一律標成 `image/jpeg`；Storage 規則只接受這三種，其他格式會略過上傳。
+- 新增 `tool/build_web.sh`：固定帶 App Check reCAPTCHA key 並檢查是否編進去，建置請用它。
+- 已知未上線：`lib/components/icon_text.dart` 改成顯示真正圖示的修正（commit `74d252a`）只在本機。`IconText` 目前線上仍以中文方括號文字取代圖示（例如「[儀表板]」），是早期 MaterialIcons 字型載入失敗時的緊急替代方案，字型已修好但元件沒換回來。
