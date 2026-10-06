@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../services/database_service.dart';
 import 'fabric_page.dart' show detectImageType;
@@ -446,6 +447,35 @@ class _ImageLightboxState extends State<_ImageLightbox> {
     _pageController = PageController(initialPage: widget.initialIndex);
   }
 
+  bool _sharing = false;
+
+  /// 下載目前這張相並叫出系統分享面板。iPhone／iPad 分享面板有「拷貝」「儲存影像」等選項，
+  /// 因為 Web 版圖片無法用長按選取或拷貝。
+  Future<void> _shareCurrent() async {
+    final imageUrl = widget.images[_currentIndex]['imageUrl'] as String;
+    setState(() => _sharing = true);
+    try {
+      final bytes = await FirebaseStorage.instance.refFromURL(imageUrl).getData();
+      if (bytes == null) throw 'empty image';
+      final type = detectImageType(bytes);
+      if (type == null) throw 'unsupported format';
+      await Share.shareXFiles([
+        XFile.fromData(
+          bytes,
+          mimeType: type.contentType,
+          name: 'order_photo_${_currentIndex + 1}.${type.ext}',
+        ),
+      ]);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('無法分享圖片：$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
   @override
   void dispose() {
     _pageController.dispose();
@@ -464,6 +494,13 @@ class _ImageLightboxState extends State<_ImageLightbox> {
           '${_currentIndex + 1} / ${widget.images.length}',
           style: const TextStyle(color: Colors.white),
         ),
+        actions: [
+          IconButton(
+            tooltip: '分享／拷貝／儲存圖片',
+            icon: const Icon(Icons.ios_share),
+            onPressed: _sharing ? null : _shareCurrent,
+          ),
+        ],
       ),
       body: PageView.builder(
         controller: _pageController,
