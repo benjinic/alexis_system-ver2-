@@ -206,5 +206,7 @@ const Map<String, Map<String, String>> _designZh = {
     'back': '背部款式',
     'cuff': '袖口款式',
     'fit': '版型',
+    'embroidery': '繡字',
+    'pocket': '袋款',
   },
 };
