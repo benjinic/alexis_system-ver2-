@@ -432,7 +432,9 @@ curl -s https://alexis-tailor-system-2025.web.app/assets/FontManifest.json
 
 ### 訂製訂單（Bespoke）
 
-訂製西裝訂單功能已拆出為獨立 Flutter App：`../alexis_bespoke`（https://alexis-bespoke.web.app，GitHub：`benjinic/Alexis_bespoke_form`），與本系統共用同一個 Firebase 專案與登入帳號。
+訂製西裝訂單功能已拆出為獨立 Flutter App：`../alexis_bespoke`（https://alexis-bespoke-staff.web.app，GitHub：`benjinic/Alexis_bespoke_form`），與本系統共用同一個 Firebase 專案與登入帳號。
+
+> **2026-10-13**：這個 App 原本用 `alexis-bespoke.web.app`，但這個網址同時被另一個 Next.js 客人購物網站（`../alexis_website`，`benjinic/alexis_website`）使用，兩邊部署會互相覆蓋。已改為 `alexis-bespoke-staff.web.app`，`alexis-bespoke.web.app` 留給客人購物網站。`alexis_website` 那邊需要重新部署才能恢復正常（目前還顯示舊的 Flutter 內容）。
 本系統不再包含 Bespoke 頁面與導覽入口，但 Firestore collection `bespoke_orders` 的安全規則仍保留在本專案的 `firestore.rules`（同一個 Firebase 專案共用一份規則）。
 
 **分工**：Bespoke 只負責建立訂製訂單並上傳（沒有單號、不計價）；正式訂單、單號、價錢、成本、庫存扣減全部由本系統 POS 處理。
