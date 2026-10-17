@@ -31,6 +31,7 @@ class BespokeOrderSummary {
     required this.deposit,
     required this.totalPrice,
     required this.items,
+    this.isSuit = false,
   });
 
   final String id;
@@ -44,6 +45,9 @@ class BespokeOrderSummary {
   final double deposit;
   final double totalPrice;
   final List<Map<String, dynamic>> items;
+
+  /// Bespoke 嗰邊標記「外套＋褲子顯示做西裝」；只影響摘要文字，items 本身唔變。
+  final bool isSuit;
 
   factory BespokeOrderSummary.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final m = doc.data() ?? {};
@@ -63,13 +67,30 @@ class BespokeOrderSummary {
                 .map((e) => Map<String, dynamic>.from(e))
                 .toList()
           : const [],
+      isSuit: (m['isSuit'] ?? false) == true,
     );
   }
 
-  /// 衣服類型簡述，例如「外套 · 褲子」。
-  String get garmentLabels => items
-      .map((i) => _garmentZh[i['type']] ?? (i['type'] ?? '').toString())
-      .join(' · ');
+  /// 衣服類型簡述，例如「外套 · 褲子」；isSuit 時外套＋褲子一對合併做「西裝」。
+  String get garmentLabels {
+    final hasJacket = items.any((i) => i['type'] == 'jacket');
+    final hasTrousers = items.any((i) => i['type'] == 'trousers');
+    final asSuit = isSuit && hasJacket && hasTrousers;
+    var suitAdded = false;
+    final parts = <String>[];
+    for (final i in items) {
+      final type = i['type'];
+      if (asSuit && (type == 'jacket' || type == 'trousers')) {
+        if (!suitAdded) {
+          parts.add('西裝');
+          suitAdded = true;
+        }
+        continue;
+      }
+      parts.add(_garmentZh[type] ?? (type ?? '').toString());
+    }
+    return parts.join(' · ');
+  }
 
   /// 帶入 POS 備注嘅文字：電話、各項目布料同設計規格。
   String toNotesText() {
