@@ -122,32 +122,39 @@ class IconText extends StatelessWidget {
   final bool applyTextScaling;
   final BlendMode? blendMode;
 
-  /// 讀屏幕輔助工具用嘅描述；冇明確 semanticLabel 就用返 _materialIconLabels
-  /// 嘅中文名（去掉方括號）。呢個 map 之前係用嚟直接顯示做文字替代圖示，
-  /// 而家 MaterialIcons 字型已經確認打包正常，改返用 Icon 顯示真正嘅圖示，
-  /// map 就轉做輔助工具嘅描述文字，冇資料再浪費。
-  String? _resolveSemanticLabel() {
+  /// [2026-10-19] 改返用真 Icon() 嘅版本喺真實瀏覽器度顯示做空白方塊
+  /// （唔係方括號文字，而係完全睇唔到），即係 MaterialIcons 字型實際上冇正常
+  /// 載入——同 headless Chrome 測試嘅結果唔一致。改返用文字方括號頂住，
+  /// 起碼用戶睇到文字知道個掣做乜，唔好再改用 Icon() 除非已經喺真實裝置
+  /// 確認個字型檔正常顯示。
+  String _resolveLabel() {
     if (semanticLabel != null && semanticLabel!.trim().isNotEmpty) {
-      return semanticLabel;
+      return semanticLabel!;
     }
-    return _materialIconLabels[icon]?.replaceAll(RegExp(r'^\[|\]$'), '');
+
+    final mapped = _materialIconLabels[icon];
+    if (mapped != null) {
+      return mapped;
+    }
+
+    return '[圖示]';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Icon(
-      icon,
-      size: size,
-      fill: fill,
-      weight: weight,
-      grade: grade,
-      opticalSize: opticalSize,
-      color: color,
-      shadows: shadows,
-      semanticLabel: _resolveSemanticLabel(),
+    final label = _resolveLabel();
+
+    return Text(
+      label,
       textDirection: textDirection,
-      applyTextScaling: applyTextScaling,
-      blendMode: blendMode,
+      textScaler: applyTextScaling
+          ? MediaQuery.textScalerOf(context)
+          : TextScaler.noScaling,
+      style: TextStyle(
+        fontSize: size ?? 12,
+        color: color ?? Theme.of(context).colorScheme.onSurface,
+        shadows: shadows,
+      ),
     );
   }
 }
