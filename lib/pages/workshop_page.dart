@@ -151,12 +151,30 @@ class _WorkshopPageState extends State<WorkshopPage> {
   }
 
   void _toggleArchive(WorkshopOrder order, bool archive) async {
+    final now = DateTime.now();
     await _dbService.updateWorkshopOrder(
       order.copyWith(
         status: archive ? WorkshopStatus.archived : WorkshopStatus.completed,
-        updatedAt: DateTime.now(),
+        updatedAt: now,
       ),
     );
+
+    // 同一張訂單可能有幾件衫、各自一張工單；封存一張嗰陣，
+    // 一齊封存同一訂單編號、已完成嘅其他工單，咁先唔會見到
+    // 「封存咗但又喺度」嘅同單號卡（見返 _toggleArchive 嘅呼叫處）。
+    if (archive && order.orderId.isNotEmpty) {
+      final siblings = _currentOrders.where(
+        (o) =>
+            o.id != order.id &&
+            o.orderId == order.orderId &&
+            o.status == WorkshopStatus.completed,
+      );
+      for (final sibling in siblings) {
+        await _dbService.updateWorkshopOrder(
+          sibling.copyWith(status: WorkshopStatus.archived, updatedAt: now),
+        );
+      }
+    }
   }
 
   Future<void> _toggleFabricOrdered(WorkshopOrder order) async {
@@ -804,67 +822,86 @@ class _WorkshopPageState extends State<WorkshopPage> {
           ),
           child: Column(
             children: [
-              // 欄位標題 + 數量
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: color[100],
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(16),
-                  ),
+              // 欄位標題 + 數量 (點擊展開呢條欄所有訂單嘅工作內容)
+              InkWell(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(16),
                 ),
-                child: Row(
-                  children: [
-                    IconText(Icons.circle, size: 12, color: color[700]),
-                    const SizedBox(width: 8),
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: color[900],
+                onTap: displayOrders.isEmpty
+                    ? null
+                    : () => _showStageDetails(
+                        context,
+                        title,
+                        color,
+                        displayOrders,
                       ),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: color[100],
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(16),
                     ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '${displayOrders.length}',
+                  ),
+                  child: Row(
+                    children: [
+                      IconText(Icons.circle, size: 12, color: color[700]),
+                      const SizedBox(width: 8),
+                      Text(
+                        title,
                         style: TextStyle(
-                          fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: color,
+                          color: color[900],
                         ),
                       ),
-                    ),
-                    if (overdueCount > 0) ...[
                       const SizedBox(width: 4),
+                      Icon(
+                        Icons.open_in_full,
+                        size: 13,
+                        color: color[700],
+                      ),
+                      const Spacer(),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
+                          horizontal: 8,
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.red,
-                          borderRadius: BorderRadius.circular(10),
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
-                          '$overdueCount ⚠',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
+                          '${displayOrders.length}',
+                          style: TextStyle(
+                            fontSize: 12,
                             fontWeight: FontWeight.bold,
+                            color: color,
                           ),
                         ),
                       ),
+                      if (overdueCount > 0) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '$overdueCount ⚠',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
               // 訂單列表
@@ -1089,6 +1126,199 @@ class _WorkshopPageState extends State<WorkshopPage> {
           ),
         );
       },
+    );
+  }
+
+  // 點擊欄位標題：展開呢條欄所有訂單嘅工作內容
+  void _showStageDetails(
+    BuildContext context,
+    String stageTitle,
+    MaterialColor color,
+    List<WorkshopOrder> orders,
+  ) {
+    final now = DateTime.now();
+    showDialog(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560, maxHeight: 640),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 16),
+                decoration: BoxDecoration(
+                  color: color[100],
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(16),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    IconText(Icons.circle, size: 12, color: color[700]),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '$stageTitle (${orders.length})',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: color[900],
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const IconText(Icons.close),
+                      onPressed: () => Navigator.pop(dialogContext),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: orders.length,
+                  separatorBuilder: (context, index) =>
+                      const Divider(height: 24),
+                  itemBuilder: (context, index) {
+                    final order = orders[index];
+                    final isOverdue =
+                        order.status != WorkshopStatus.completed &&
+                        order.status != WorkshopStatus.archived &&
+                        now.isAfter(order.dueDate);
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () {
+                        Navigator.pop(dialogContext);
+                        _showOrderDetails(context, order);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    order.customer,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (order.priority == 'urgent')
+                                  Container(
+                                    margin: const EdgeInsets.only(right: 6),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Text(
+                                      'URGENT',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                Text(
+                                  '#${order.orderId}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              order.item,
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.calendar_today,
+                                  size: 13,
+                                  color: isOverdue
+                                      ? Colors.red
+                                      : Colors.grey[600],
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  DateFormat('yyyy-MM-dd').format(
+                                    order.dueDate,
+                                  ),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isOverdue
+                                        ? Colors.red
+                                        : Colors.grey[600],
+                                    fontWeight: isOverdue
+                                        ? FontWeight.bold
+                                        : null,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Icon(
+                                  Icons.content_cut,
+                                  size: 13,
+                                  color: order.isFabricOrdered
+                                      ? Colors.green
+                                      : Colors.grey[500],
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  order.isFabricOrdered ? '已訂布' : '未訂布',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: order.isFabricOrdered
+                                        ? Colors.green
+                                        : Colors.grey[500],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (order.notes.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange[50],
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  order.notes,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.brown[800],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
