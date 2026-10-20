@@ -204,100 +204,41 @@ class WorkshopCard extends StatelessWidget {
                           ),
                         ),
 
-                      // === 隱藏式功能選單 (Popup Menu) ===
-                      PopupMenuButton<String>(
-                        icon: const IconText(
-                          Icons.more_vert,
-                          color: Colors.grey,
-                        ),
-                        tooltip: 'Actions',
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        onSelected: (value) {
-                          if (value == 'edit' && onEdit != null) {
-                            onEdit!();
-                          }
-                          if (value == 'next' && onNextStage != null) {
-                            onNextStage!();
-                          }
-                          if (value == 'print' && onPrint != null) {
-                            onPrint!();
-                          }
-                          if (value == 'archive' && onArchive != null) {
-                            onArchive!();
-                          }
-                        },
-                        itemBuilder: (BuildContext context) => [
-                          if (!isCompleted && onNextStage != null)
-                            PopupMenuItem(
-                              value: 'next',
-                              child: Row(
-                                children: [
-                                  IconText(
-                                    Icons.arrow_forward,
-                                    color: Theme.of(context).primaryColor,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    'Move to Next Stage',
-                                    style: TextStyle(
-                                      color: Theme.of(context).primaryColor,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          const PopupMenuItem(
-                            value: 'edit',
-                            child: Row(
-                              children: [
-                                IconText(Icons.edit_outlined, size: 20),
-                                SizedBox(width: 12),
-                                Text('Edit Details'),
-                              ],
-                            ),
-                          ),
-                          if (onPrint != null)
-                            const PopupMenuItem(
-                              value: 'print',
-                              child: Row(
-                                children: [
-                                  IconText(Icons.print_outlined, size: 20),
-                                  SizedBox(width: 12),
-                                  Text('Print Job Ticket'),
-                                ],
-                              ),
-                            ),
-                          if (isCompleted && onArchive != null)
-                            const PopupMenuDivider(),
-                          if (isCompleted && onArchive != null)
-                            PopupMenuItem(
-                              value: 'archive',
-                              child: Row(
-                                children: [
-                                  IconText(
-                                    Icons.archive_outlined,
-                                    color: Colors.grey[700],
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    'Archive Order',
-                                    style: TextStyle(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurface
-                                          .withValues(alpha: 0.8),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
+                      // === 動作按鈕：直接顯示喺卡片上，唔使點隱藏式選單先搵到 ===
+                      // 「下一階段」已經有底部嘅快速推進掣，呢度唔重複。
+                      IconButton(
+                        tooltip: 'Edit Details',
+                        icon: const IconText(Icons.edit_outlined, size: 18),
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(),
+                        padding: const EdgeInsets.all(6),
+                        onPressed: onEdit,
                       ),
+                      if (onPrint != null)
+                        IconButton(
+                          tooltip: 'Print Job Ticket',
+                          icon: const IconText(
+                            Icons.print_outlined,
+                            size: 18,
+                          ),
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(),
+                          padding: const EdgeInsets.all(6),
+                          onPressed: onPrint,
+                        ),
+                      if (isCompleted && onArchive != null)
+                        IconButton(
+                          tooltip: 'Archive Order',
+                          icon: IconText(
+                            Icons.archive_outlined,
+                            size: 18,
+                            color: Colors.grey[700],
+                          ),
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(),
+                          padding: const EdgeInsets.all(6),
+                          onPressed: onArchive,
+                        ),
                     ],
                   ),
                 ],
@@ -466,31 +407,6 @@ class WorkshopCard extends StatelessWidget {
 
               const SizedBox(height: 8),
 
-              // === 4. 進度條 ===
-              Row(
-                children: [
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: order.progress / 100.0,
-                        backgroundColor: Colors.white.withValues(alpha: 0.1),
-                        color: isCompleted ? Colors.green : cardColor,
-                        minHeight: 5,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${order.progress}%',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[500],
-                    ),
-                  ),
-                ],
-              ),
             ],
           ),
         ),
