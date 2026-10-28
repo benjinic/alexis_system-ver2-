@@ -210,10 +210,11 @@ function calculateOrderDerivedFields(order, items, serviceMap, { recalculateCost
       const service = serviceMap.get(String(item.service || item.serviceName || ''));
       return sum + toNumber(service?.outsourcingCost) * toNumber(item.quantity, 1);
     }, 0);
-    totalCost = materialCost + outsourcingCost + toNumber(order.fixedCost);
+    // laborCost 由 app 輸入，同 app 嘅 calculateTotalCost 一樣計入總成本。
+    totalCost =
+      materialCost + outsourcingCost + toNumber(order.fixedCost) + toNumber(order.laborCost);
     Object.assign(derived, {
       materialCost: roundMoney(materialCost),
-      laborCost: 0,
       outsourcingCost: roundMoney(outsourcingCost),
       totalCost: roundMoney(totalCost),
     });
