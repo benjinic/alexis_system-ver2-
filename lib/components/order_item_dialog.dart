@@ -162,6 +162,7 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
     }
 
     final newItem = OrderItem(
+      docId: widget.existingItem?.docId,
       id:
           widget.existingItem?.id ??
           DateTime.now().millisecondsSinceEpoch.toString(),

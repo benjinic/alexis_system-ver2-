@@ -328,6 +328,8 @@ class Order {
 }
 
 class OrderItem {
+  // order_items 文件 ID，只喺本地用嚟對返原本嘅文件，唔寫入資料庫。
+  final String? docId;
   final String id;
   final String orderId; // 新增：關聯到訂單 ID
   final String service;
@@ -348,6 +350,7 @@ class OrderItem {
   final double fabricUsage; // 新 POS: 布料用量
 
   OrderItem({
+    this.docId,
     required this.id,
     this.orderId = '', // 預設空，寫入時補上
     required this.service,
@@ -419,6 +422,7 @@ class OrderItem {
   }
 
   OrderItem copyWith({
+    String? docId,
     String? id,
     String? orderId,
     String? service,
@@ -437,6 +441,7 @@ class OrderItem {
     double? fabricUsage,
   }) {
     return OrderItem(
+      docId: docId ?? this.docId,
       id: id ?? this.id,
       orderId: orderId ?? this.orderId,
       service: service ?? this.service,

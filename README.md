@@ -323,7 +323,7 @@ curl -s https://alexis-tailor-system-2025.web.app/assets/FontManifest.json
 
 ## 待處理事項
 
-- **`orders` 同 `order_items` 寫入邏輯有重疊，之後要整理。** 而家金額、成本同摘要喺兩邊都有計：app 落單時計一次（`pos_page.dart` 的 `_processOrder`、`CostCalculationService`），Cloud Functions（`functions/index.js` 的 `syncOrderDerivedFields`）收到 `orders` 或 `order_items` 寫入又再計一次，兩邊規則唔完全一致。另外 `updateOrder()` 每次編輯都會刪晒 `order_items` 再重建。之後要決定邊個欄位由邊一方負責，只計一次。
+- **`orders` 同 `order_items` 寫入邏輯有重疊，之後要整理。** 而家金額、成本同摘要喺兩邊都有計：app 落單時計一次（`pos_page.dart` 的 `_processOrder`、`CostCalculationService`），Cloud Functions（`functions/index.js` 的 `syncOrderDerivedFields`）收到 `orders` 或 `order_items` 寫入又再計一次，兩邊規則唔完全一致。之後要決定邊個欄位由邊一方負責，只計一次。
 
 ---
 
