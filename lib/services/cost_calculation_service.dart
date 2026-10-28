@@ -25,14 +25,20 @@ class CostCalculationService {
     return _resolveUnitPrice(item, serviceByName);
   }
 
+  // 同步售價，並將未有記錄嘅每件外判成本按而家嘅 services 設定記低，
+  // 之後重算成本都用返落單時嘅數，唔會因為改價而變。
   static List<OrderItem> syncItemsWithServicePrices(
     List<OrderItem> items, {
     Map<String, ServiceItem> serviceByName = const {},
   }) {
     return items
         .map(
-          (item) =>
-              item.copyWith(price: _resolveUnitPrice(item, serviceByName)),
+          (item) => item.copyWith(
+            price: _resolveUnitPrice(item, serviceByName),
+            outsourcingCost:
+                item.outsourcingCost ??
+                serviceByName[item.service]?.outsourcingCost,
+          ),
         )
         .toList();
   }
@@ -104,7 +110,9 @@ class CostCalculationService {
       serviceByName: serviceByName,
     );
     final hasExplicitOutsourcingConfig = syncedItems.any(
-      (item) => serviceByName[item.service]?.outsourcingCost != null,
+      (item) =>
+          item.outsourcingCost != null ||
+          serviceByName[item.service]?.outsourcingCost != null,
     );
     final outsourcingCost = hasExplicitOutsourcingConfig
         ? recalculatedOutsourcingCost
@@ -182,12 +190,13 @@ class CostCalculationService {
     return materialCost + outsourcingCost + fixedCost + laborCost;
   }
 
-  // 新邏輯：使用服務明確設定的 outsourcingCost，不再反推 (/2.5)
+  // 逐項計：優先用細項落單時記低嘅每件外判成本，冇先用服務設定，再乘數量。
   static double calculateItemOutsourcingCost(
     OrderItem item, {
     Map<String, ServiceItem> serviceByName = const {},
   }) {
-    final configuredPerUnit = serviceByName[item.service]?.outsourcingCost;
+    final configuredPerUnit =
+        item.outsourcingCost ?? serviceByName[item.service]?.outsourcingCost;
     if (configuredPerUnit == null) {
       return 0;
     }

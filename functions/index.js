@@ -205,11 +205,15 @@ function calculateOrderDerivedFields(order, items, serviceMap, { recalculateCost
 
   let totalCost;
   if (recalculateCosts || order.totalCost == null) {
-    const materialCost = items.reduce((sum, item) => sum + toNumber(item.cost), 0);
-    const outsourcingCost = items.reduce((sum, item) => {
-      const service = serviceMap.get(String(item.service || item.serviceName || ''));
-      return sum + toNumber(service?.outsourcingCost) * toNumber(item.quantity, 1);
-    }, 0);
+    // 逐項計：cost 係每件布料成本，要乘數量（同 app 購物車一致）。
+    const materialCost = items.reduce(
+      (sum, item) => sum + toNumber(item.cost) * toNumber(item.quantity, 1),
+      0
+    );
+    const outsourcingCost = items.reduce(
+      (sum, item) => sum + itemOutsourcingPerUnit(item, serviceMap) * toNumber(item.quantity, 1),
+      0
+    );
     // laborCost 由 app 輸入，同 app 嘅 calculateTotalCost 一樣計入總成本。
     totalCost =
       materialCost + outsourcingCost + toNumber(order.fixedCost) + toNumber(order.laborCost);
@@ -224,6 +228,15 @@ function calculateOrderDerivedFields(order, items, serviceMap, { recalculateCost
 
   derived.totalProfit = roundMoney(toNumber(order.total) - totalCost);
   return derived;
+}
+
+// 優先用細項落單時記低嘅每件外判成本；舊資料冇記錄先用 services 而家嘅設定。
+function itemOutsourcingPerUnit(item, serviceMap) {
+  if (typeof item.outsourcingCost === 'number') {
+    return Math.max(0, item.outsourcingCost);
+  }
+  const service = serviceMap.get(String(item.service || item.serviceName || ''));
+  return Math.max(0, toNumber(service?.outsourcingCost));
 }
 
 // 只係改咗訂布狀態（isFabricOrdered / updatedAt）嘅 order_items 寫入，唔使重算成本。

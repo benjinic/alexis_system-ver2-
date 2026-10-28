@@ -338,7 +338,9 @@ class OrderItem {
   final String? fabricId;
   final String? fabricName;
   final double fabricUsed;
-  final double cost;
+  final double cost; // 每件布料成本
+  // 落單時記低嘅每件外判成本；舊資料冇記錄就係 null，計成本時改用 services 設定。
+  final double? outsourcingCost;
   final bool isFabricOrdered;
   final bool manualUnitPrice;
   final bool sendToWorkshop; // UI-only: controls workshop order creation on save
@@ -360,6 +362,7 @@ class OrderItem {
     this.fabricName,
     this.fabricUsed = 0.0,
     this.cost = 0.0,
+    this.outsourcingCost,
     this.isFabricOrdered = false,
     this.manualUnitPrice = false,
     this.sendToWorkshop = true,
@@ -388,6 +391,9 @@ class OrderItem {
       fabricName: map['fabricName']?.toString(),
       fabricUsed: fabricUsageValue,
       cost: Order._parseDouble(map['cost']),
+      outsourcingCost: map['outsourcingCost'] == null
+          ? null
+          : Order._parseDouble(map['outsourcingCost']),
       isFabricOrdered: map['isFabricOrdered'] == true,
       manualUnitPrice: map['manualUnitPrice'] == true,
       sendToWorkshop: false, // existing items: don't re-create workshop orders
@@ -410,6 +416,7 @@ class OrderItem {
       'fabricName': fabricName,
       'fabricUsed': fabricUsed,
       'cost': cost,
+      'outsourcingCost': outsourcingCost,
       'isFabricOrdered': isFabricOrdered,
       'manualUnitPrice': manualUnitPrice,
       // sendToWorkshop is UI-only, not persisted to Firestore
@@ -432,6 +439,7 @@ class OrderItem {
     String? fabricName,
     double? fabricUsed,
     double? cost,
+    double? outsourcingCost,
     bool? isFabricOrdered,
     bool? manualUnitPrice,
     bool? sendToWorkshop,
@@ -451,6 +459,7 @@ class OrderItem {
       fabricName: fabricName ?? this.fabricName,
       fabricUsed: fabricUsed ?? this.fabricUsed,
       cost: cost ?? this.cost,
+      outsourcingCost: outsourcingCost ?? this.outsourcingCost,
       isFabricOrdered: isFabricOrdered ?? this.isFabricOrdered,
       manualUnitPrice: manualUnitPrice ?? this.manualUnitPrice,
       sendToWorkshop: sendToWorkshop ?? this.sendToWorkshop,
