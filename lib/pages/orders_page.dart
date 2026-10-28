@@ -164,6 +164,7 @@ class _OrdersPageState extends State<OrdersPage> {
       await _dbService.updateOrderItemFabricStatus(
         orderId: orderId,
         itemId: item.id,
+        itemDocId: item.docId,
         isFabricOrdered: !item.isFabricOrdered,
       );
 

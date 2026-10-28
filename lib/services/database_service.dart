@@ -317,7 +317,9 @@ class DatabaseService implements DatabaseServiceInterface {
           .get();
 
       return snapshot.docs.map((doc) {
-        return OrderItem.fromMap(doc.data() as Map<String, dynamic>);
+        return OrderItem.fromMap(
+          doc.data() as Map<String, dynamic>,
+        ).copyWith(docId: doc.id);
       }).toList();
     } catch (e) {
       _log('Error fetching items for order $orderId: $e', error: e);
@@ -358,16 +360,29 @@ class DatabaseService implements DatabaseServiceInterface {
       final oldItemsSnapshot = await _orderItemsRef
           .where('orderId', isEqualTo: order.id)
           .get();
+      final oldItemsByDocId = {
+        for (final doc in oldItemsSnapshot.docs) doc.id: doc,
+      };
 
-      for (var doc in oldItemsSnapshot.docs) {
-        batch.delete(doc.reference);
+      // 有 docId 嘅細項沿用原本文件，只寫有改動嘅；新細項開新文件；
+      // 已經唔喺訂單入面嘅舊細項先刪除。
+      for (final item in order.items) {
+        final itemData = item.toJson();
+        itemData['orderId'] = order.id;
+
+        final oldDoc = oldItemsByDocId.remove(item.docId);
+        if (oldDoc == null) {
+          batch.set(_orderItemsRef.doc(), itemData);
+        } else if (_itemDataChanged(
+          oldDoc.data() as Map<String, dynamic>,
+          itemData,
+        )) {
+          batch.set(oldDoc.reference, itemData, SetOptions(merge: true));
+        }
       }
 
-      for (var item in order.items) {
-        DocumentReference itemRef = _orderItemsRef.doc();
-        Map<String, dynamic> itemData = item.toJson();
-        itemData['orderId'] = order.id;
-        batch.set(itemRef, itemData);
+      for (final doc in oldItemsByDocId.values) {
+        batch.delete(doc.reference);
       }
 
       await batch.commit();
@@ -384,6 +399,14 @@ class DatabaseService implements DatabaseServiceInterface {
       'status': status,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  bool _itemDataChanged(
+    Map<String, dynamic> oldData,
+    Map<String, dynamic> newData,
+  ) {
+    // Dart 入面 550 == 550.0，Firestore 讀返嚟嘅 int/double 差異唔會當成改動。
+    return newData.entries.any((entry) => oldData[entry.key] != entry.value);
   }
 
   // 保留舊呼叫點；實際同步改由 order_items trigger 聚合到 orders/workshop_orders。
@@ -447,8 +470,18 @@ class DatabaseService implements DatabaseServiceInterface {
   Future<void> updateOrderItemFabricStatus({
     required String orderId,
     required String itemId,
+    String? itemDocId,
     required bool isFabricOrdered,
   }) async {
+    // 舊匯入資料同一張單嘅細項共用同一個 id，有 docId 就直接改嗰份文件，唔好靠 id 搵。
+    if (itemDocId != null) {
+      await _orderItemsRef.doc(itemDocId).update({
+        'isFabricOrdered': isFabricOrdered,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return;
+    }
+
     final itemSnapshot = await _orderItemsRef
         .where('orderId', isEqualTo: orderId)
         .where('id', isEqualTo: itemId)
