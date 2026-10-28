@@ -565,10 +565,52 @@ class _POSPageState extends State<POSPage> {
                 final messenger = ScaffoldMessenger.of(context);
                 final navigator = Navigator.of(ctx);
                 final l10n = AppLocalizations.of(context);
+                final errorColor = Theme.of(context).colorScheme.error;
                 try {
+                  final inputName = nameController.text.trim();
+                  final inputPhone = phoneController.text.trim();
+                  final duplicates = await _dbService.findDuplicateCustomers(
+                    name: inputName,
+                    phone: inputPhone,
+                  );
+                  if (!mounted) return;
+                  if (duplicates.isNotEmpty) {
+                    final sameName = duplicates.where(
+                      (c) =>
+                          DatabaseService.normalizeCustomerName(c.name) ==
+                          DatabaseService.normalizeCustomerName(inputName),
+                    );
+                    if (sameName.isEmpty) {
+                      // 電話撞咗其他客戶：唔開新客戶，等員工確認。
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            '電話號碼「$inputPhone」已登記喺客戶「${duplicates.first.name}」',
+                          ),
+                          backgroundColor: errorColor,
+                        ),
+                      );
+                      return;
+                    }
+                    // 同名客戶已存在：直接揀返佢，唔再開新客戶。
+                    final existing = sameName.reduce(
+                      (a, b) => b.orders > a.orders ? b : a,
+                    );
+                    setState(() {
+                      _selectedCustomerId = existing.id;
+                      _selectedCustomer = existing;
+                      _customerNameController.text = existing.name;
+                    });
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('客戶「${existing.name}」已存在，已揀選現有客戶')),
+                    );
+                    navigator.pop();
+                    return;
+                  }
+
                   final newCustomer = Customer(
                     id: '',
-                    name: nameController.text.trim(),
+                    name: inputName,
                     phone: phoneController.text.trim(),
                     email: emailController.text.trim(),
                     orders: 0,
@@ -772,15 +814,24 @@ class _POSPageState extends State<POSPage> {
       if (_selectedCustomerId != null) {
         customerId = _selectedCustomerId!;
       } else if (!isEditMode && customerId.isEmpty) {
-        final newCustomer = Customer(
-          id: '',
+        // 輸入咗名但冇揀客戶：有同名客戶就用返佢（揀單數最多嗰個），冇先開新客戶。
+        final sameName = await _dbService.findDuplicateCustomers(
           name: finalCustomerName,
-          email: '',
-          phone: '',
-          orders: 0,
-          totalSpent: 0,
         );
-        customerId = await _dbService.addCustomer(newCustomer);
+        if (sameName.isNotEmpty) {
+          sameName.sort((a, b) => b.orders.compareTo(a.orders));
+          customerId = sameName.first.id;
+        } else {
+          final newCustomer = Customer(
+            id: '',
+            name: finalCustomerName,
+            email: '',
+            phone: '',
+            orders: 0,
+            totalSpent: 0,
+          );
+          customerId = await _dbService.addCustomer(newCustomer);
+        }
       }
 
       final orderData = Order(

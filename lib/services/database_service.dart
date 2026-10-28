@@ -732,6 +732,26 @@ class DatabaseService implements DatabaseServiceInterface {
         });
   }
 
+  // 名稱比較唔理大細楷同前後空格，同客戶頁嘅重覆檢查一致。
+  static String normalizeCustomerName(String name) => name.trim().toUpperCase();
+
+  // 用嚟喺開新客戶之前檢查同名或同電話嘅現有客戶。
+  Future<List<Customer>> findDuplicateCustomers({
+    required String name,
+    String phone = '',
+  }) async {
+    final targetName = normalizeCustomerName(name);
+    final targetPhone = phone.trim();
+    final customers = await getCustomersOnce();
+    return customers
+        .where(
+          (c) =>
+              normalizeCustomerName(c.name) == targetName ||
+              (targetPhone.isNotEmpty && c.phone.trim() == targetPhone),
+        )
+        .toList();
+  }
+
   Future<String> addCustomer(Customer customer) async {
     final docRef = await _customersRef.add(customer.toJson());
     return docRef.id;
