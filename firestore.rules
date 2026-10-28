@@ -199,6 +199,7 @@ service cloud.firestore {
           'fabricName',
           'fabricUsed',
           'cost',
+          'outsourcingCost',
           'isFabricOrdered',
           'manualUnitPrice',
           'serviceName',
@@ -217,6 +218,7 @@ service cloud.firestore {
         optionalString('fabricName') &&
         optionalNumber('fabricUsed') &&
         optionalNumber('cost') &&
+        optionalNumber('outsourcingCost') &&
         optionalBool('isFabricOrdered') &&
         optionalBool('manualUnitPrice') &&
         optionalString('serviceName') &&

@@ -1389,8 +1389,9 @@ class _POSPageState extends State<POSPage> {
                               item,
                               serviceByName: _serviceByName,
                             );
+                      // 歷史單只顯示落單時記低嘅外判成本，唔用今日價錢。
                       final itemOutsourcingCost = _isHistorical
-                          ? item.cost
+                          ? (item.outsourcingCost ?? 0) * item.quantity
                           : CostCalculationService.calculateItemOutsourcingCost(
                               item,
                               serviceByName: _serviceByName,

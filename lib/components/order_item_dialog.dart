@@ -173,6 +173,10 @@ class _OrderItemDialogState extends State<OrderItemDialog> {
       fabricName: _selectedFabric?.name,
       fabricUsed: finalUsage,
       cost: estimatedMaterialCost,
+      // 服務冇改就保留落單時記低嘅外判成本；改咗服務就留空，儲存時按新服務記低。
+      outsourcingCost: widget.existingItem?.service == _selectedService!.name
+          ? widget.existingItem?.outsourcingCost
+          : null,
       isFabricOrdered: widget.existingItem?.isFabricOrdered ?? false,
       manualUnitPrice: manualUnitPrice,
       sendToWorkshop: widget.existingItem?.sendToWorkshop ?? true,

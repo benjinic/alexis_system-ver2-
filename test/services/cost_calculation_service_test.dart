@@ -6,6 +6,42 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('CostCalculationService', () {
+    test('item outsourcing uses the cost recorded on the item first', () {
+      final services = {
+        'Shirt': _service(name: 'Shirt', price: 900, outsourcingCost: 999),
+        'Suit': _service(name: 'Suit', price: 3000, outsourcingCost: 1200),
+      };
+
+      final recorded = _item(
+        service: 'Shirt',
+        price: 900,
+        quantity: 2,
+        outsourcingCost: 150,
+      );
+      final legacy = _item(service: 'Suit', price: 3000, quantity: 1);
+
+      expect(
+        CostCalculationService.calculateOutsourcingCostFromItems([
+          recorded,
+          legacy,
+        ], serviceByName: services),
+        150 * 2 + 1200,
+      );
+    });
+
+    test('syncing prices records outsourcing cost only when missing', () {
+      final services = {
+        'Shirt': _service(name: 'Shirt', price: 900, outsourcingCost: 250),
+      };
+
+      final synced = CostCalculationService.syncItemsWithServicePrices([
+        _item(service: 'Shirt', price: 900, quantity: 1),
+        _item(service: 'Shirt', price: 900, quantity: 1, outsourcingCost: 100),
+      ], serviceByName: services);
+
+      expect(synced.map((item) => item.outsourcingCost), [250, 100]);
+    });
+
     test('uses configured service price unless item price is manual', () {
       final services = {
         'Suit': _service(name: 'Suit', price: 2800),
@@ -222,6 +258,7 @@ OrderItem _item({
   required double price,
   required int quantity,
   bool manualUnitPrice = false,
+  double? outsourcingCost,
 }) {
   return OrderItem(
     id: service.toLowerCase(),
@@ -229,6 +266,7 @@ OrderItem _item({
     price: price,
     quantity: quantity,
     manualUnitPrice: manualUnitPrice,
+    outsourcingCost: outsourcingCost,
   );
 }
 
