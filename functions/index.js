@@ -183,16 +183,10 @@ async function getServiceMap() {
   return map;
 }
 
-function resolveUnitPrice(item, serviceMap) {
-  if (item.manualUnitPrice === true) {
-    return toNumber(item.price);
-  }
-  const service = serviceMap.get(String(item.service || item.serviceName || ''));
-  const servicePrice = toNumber(service?.price, 0);
-  return servicePrice > 0 ? servicePrice : toNumber(item.price);
-}
-
-function calculateOrderDerivedFields(order, items, serviceMap) {
+// 訂單金額（subtotal / total / balance）由 app 落單時按當時價錢計好寫入，呢度唔再重算，
+// 否則改狀態或者記付款都會用今日嘅 services 價錢重新定價。
+// 成本只喺貨品有變（新單、加減或修改 order_items）時先重算；改狀態、付款等只更新利潤。
+function calculateOrderDerivedFields(order, items, serviceMap, { recalculateCosts }) {
   const itemSummary = items
     .map((item) => String(item.service || item.serviceName || '').trim())
     .filter(Boolean)
@@ -203,42 +197,43 @@ function calculateOrderDerivedFields(order, items, serviceMap) {
       .filter(Boolean)
   )].join(', ');
 
-  const subtotal = items.length
-    ? items.reduce(
-        (sum, item) => sum + resolveUnitPrice(item, serviceMap) * toNumber(item.quantity, 1),
-        0
-      )
-    : toNumber(order.subtotal);
-  const discount = toNumber(order.discount);
-  const total = Math.max(0, subtotal - discount);
-  const materialCost = items.reduce((sum, item) => sum + toNumber(item.cost), 0);
-  const outsourcingCost = items.reduce((sum, item) => {
-    const service = serviceMap.get(String(item.service || item.serviceName || ''));
-    return sum + toNumber(service?.outsourcingCost) * toNumber(item.quantity, 1);
-  }, 0);
-  const fixedCost = toNumber(order.fixedCost);
-  const totalCost = materialCost + outsourcingCost + fixedCost;
-  const balance = Math.max(
-    0,
-    total - (toNumber(order.deposit) + toNumber(order.balancePayment))
-  );
-
-  return {
+  const derived = {
     itemSummary: itemSummary.length > 50 ? `${itemSummary.substring(0, 47)}...` : itemSummary,
     fabricSummary,
-    subtotal: roundMoney(subtotal),
-    total: roundMoney(total),
-    balance: roundMoney(balance),
-    materialCost: roundMoney(materialCost),
-    laborCost: 0,
-    outsourcingCost: roundMoney(outsourcingCost),
-    totalCost: roundMoney(totalCost),
-    totalProfit: roundMoney(total - totalCost),
     isFabricOrdered: allRequiredItemsOrdered(items),
   };
+
+  let totalCost;
+  if (recalculateCosts || order.totalCost == null) {
+    const materialCost = items.reduce((sum, item) => sum + toNumber(item.cost), 0);
+    const outsourcingCost = items.reduce((sum, item) => {
+      const service = serviceMap.get(String(item.service || item.serviceName || ''));
+      return sum + toNumber(service?.outsourcingCost) * toNumber(item.quantity, 1);
+    }, 0);
+    totalCost = materialCost + outsourcingCost + toNumber(order.fixedCost);
+    Object.assign(derived, {
+      materialCost: roundMoney(materialCost),
+      laborCost: 0,
+      outsourcingCost: roundMoney(outsourcingCost),
+      totalCost: roundMoney(totalCost),
+    });
+  } else {
+    totalCost = toNumber(order.totalCost);
+  }
+
+  derived.totalProfit = roundMoney(toNumber(order.total) - totalCost);
+  return derived;
 }
 
-async function syncOrderDerivedFields(orderId) {
+// 只係改咗訂布狀態（isFabricOrdered / updatedAt）嘅 order_items 寫入，唔使重算成本。
+function onlyFabricStatusChanged(before, after) {
+  if (!before || !after) return false;
+  const ignored = new Set(['isFabricOrdered', 'updatedAt']);
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...keys].every((key) => ignored.has(key) || valuesEqual(before[key], after[key]));
+}
+
+async function syncOrderDerivedFields(orderId, { recalculateCosts }) {
   if (!orderId) return;
 
   const orderRef = db.collection('orders').doc(orderId);
@@ -249,7 +244,9 @@ async function syncOrderDerivedFields(orderId) {
     getOrderItems(orderId),
     getServiceMap(),
   ]);
-  const derived = calculateOrderDerivedFields(orderSnapshot.data(), items, serviceMap);
+  const derived = calculateOrderDerivedFields(orderSnapshot.data(), items, serviceMap, {
+    recalculateCosts,
+  });
   const changes = changedFields(orderSnapshot.data(), derived);
   if (Object.keys(changes).length > 0) {
     await orderRef.set(
@@ -509,7 +506,10 @@ exports.syncOrderAggregates = onDocumentWritten(
     if (after?.customerId) customerIds.add(after.customerId);
 
     await Promise.all([
-      after ? syncOrderDerivedFields(event.params.orderId) : Promise.resolve(),
+      // 新單先計成本；之後改狀態、付款等唔重算，避免用今日價錢重新定價。
+      after
+        ? syncOrderDerivedFields(event.params.orderId, { recalculateCosts: !before })
+        : Promise.resolve(),
       ...[...customerIds].map((customerId) => recomputeCustomerAggregate(customerId)),
     ]);
   }
@@ -525,6 +525,9 @@ exports.syncOrderItemAggregates = onDocumentWritten(
     if (before?.orderId) orderIds.add(before.orderId);
     if (after?.orderId) orderIds.add(after.orderId);
 
-    await Promise.all([...orderIds].map((orderId) => syncOrderDerivedFields(orderId)));
+    const recalculateCosts = !onlyFabricStatusChanged(before, after);
+    await Promise.all(
+      [...orderIds].map((orderId) => syncOrderDerivedFields(orderId, { recalculateCosts }))
+    );
   }
 );
