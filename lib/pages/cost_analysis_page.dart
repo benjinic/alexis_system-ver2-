@@ -493,45 +493,24 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
     );
   }
 
+  // 成本由系統按訂單細項計，呢度只顯示；要改成本請用「編輯訂單」改細項。
   void _showCostDetailDialog(BuildContext context, Order order) {
-    final initialMaterialCost = order.materialCost;
-    final initialOutsourcingCost = order.outsourcingCost;
-    final initialTotalCost = order.totalCost > 0
-        ? order.totalCost
-        : CostCalculationService.calculateTotalCost(
-            materialCost: order.materialCost,
-            outsourcingCost: order.outsourcingCost,
-            fixedCost: order.fixedCost,
-          );
-
-    String fmtInput(double v) =>
-        v == v.truncateToDouble()
-        ? v.toStringAsFixed(0)
-        : v.toStringAsFixed(2);
-
-    final materialCtrl = TextEditingController(
-      text: fmtInput(order.materialCost),
-    );
-    final outsourcingCtrl = TextEditingController(
-      text: fmtInput(order.outsourcingCost),
-    );
-    bool isSaving = false;
-
-    final messenger = ScaffoldMessenger.of(context);
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
+      builder: (ctx) => Builder(
+        builder: (ctx) {
           final cs = Theme.of(ctx).colorScheme;
           final dialogRevenue = order.total;
-          final materialCost =
-              double.tryParse(materialCtrl.text) ?? initialMaterialCost;
-          final outsourcingCost =
-              double.tryParse(outsourcingCtrl.text) ?? initialOutsourcingCost;
-          final dialogTotalCost =
-              initialTotalCost +
-              (materialCost - initialMaterialCost) +
-              (outsourcingCost - initialOutsourcingCost);
+          final materialCost = order.materialCost;
+          final outsourcingCost = order.outsourcingCost;
+          final dialogTotalCost = order.totalCost > 0
+              ? order.totalCost
+              : CostCalculationService.calculateTotalCost(
+                  materialCost: order.materialCost,
+                  outsourcingCost: order.outsourcingCost,
+                  fixedCost: order.fixedCost,
+                  laborCost: order.laborCost,
+                );
           final dialogProfit = dialogRevenue - dialogTotalCost;
           final marginPct = dialogRevenue > 0
               ? (dialogProfit / dialogRevenue * 100)
@@ -678,9 +657,6 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                             );
                             final right = _buildDialogRight(
                               ctx,
-                              materialCtrl,
-                              outsourcingCtrl,
-                              setDialogState,
                               order,
                               dialogRevenue,
                               dialogProfit,
@@ -722,91 +698,15 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           OutlinedButton.icon(
-                            onPressed: isSaving
-                                ? null
-                                : () {
-                                    Navigator.pop(ctx);
-                                    _editOrderFromCostBreakdown(context, order);
-                                  },
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _editOrderFromCostBreakdown(context, order);
+                            },
                             icon: const Icon(Icons.edit_outlined, size: 16),
                             label: const Text('編輯訂單'),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 16,
-                                vertical: 12,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          FilledButton.icon(
-                            onPressed: isSaving
-                                ? null
-                                : () async {
-                                    final newMaterial = double.tryParse(
-                                      materialCtrl.text,
-                                    );
-                                    final newOutsource = double.tryParse(
-                                      outsourcingCtrl.text,
-                                    );
-                                    if (newMaterial == null ||
-                                        newOutsource == null ||
-                                        newMaterial < 0 ||
-                                        newOutsource < 0) {
-                                      messenger.showSnackBar(
-                                        SnackBar(
-                                          content: const Text(
-                                            '請輸入有效的成本數值（不可為負數）',
-                                          ),
-                                          backgroundColor: cs.error,
-                                        ),
-                                      );
-                                      return;
-                                    }
-                                    setDialogState(() => isSaving = true);
-                                    try {
-                                      await _dbService
-                                          .updateOrderCostBreakdown(
-                                            orderId: order.id,
-                                            materialCost: newMaterial,
-                                            outsourcingCost: newOutsource,
-                                          );
-                                      if (!ctx.mounted) return;
-                                      Navigator.pop(ctx);
-                                      messenger.showSnackBar(
-                                        SnackBar(
-                                          content: const Text('成本資料已更新'),
-                                          backgroundColor: cs.tertiary,
-                                        ),
-                                      );
-                                    } catch (e) {
-                                      if (!ctx.mounted) return;
-                                      messenger.showSnackBar(
-                                        SnackBar(
-                                          content: Text('更新失敗: $e'),
-                                          backgroundColor: cs.error,
-                                        ),
-                                      );
-                                    } finally {
-                                      if (ctx.mounted) {
-                                        setDialogState(() => isSaving = false);
-                                      }
-                                    }
-                                  },
-                            icon: isSaving
-                                ? const SizedBox(
-                                    height: 14,
-                                    width: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : const Icon(Icons.save_outlined, size: 16),
-                            label: const Text('儲存成本'),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: _accentRevenue,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
                                 vertical: 12,
                               ),
                             ),
@@ -938,9 +838,6 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
 
   Widget _buildDialogRight(
     BuildContext context,
-    TextEditingController materialCtrl,
-    TextEditingController outsourcingCtrl,
-    StateSetter setDialogState,
     Order order,
     double revenue,
     double profit,
@@ -958,7 +855,7 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '成本編輯',
+          '成本明細',
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
@@ -966,22 +863,6 @@ class _CostAnalysisPageState extends State<CostAnalysisPage> {
           ),
         ),
         const SizedBox(height: 10),
-        _CostInputField(
-          controller: materialCtrl,
-          label: '物料成本',
-          icon: Icons.texture,
-          color: _accentMaterial,
-          onChanged: () => setDialogState(() {}),
-        ),
-        const SizedBox(height: 10),
-        _CostInputField(
-          controller: outsourcingCtrl,
-          label: '外包成本',
-          icon: Icons.handshake_outlined,
-          color: _accentOutsource,
-          onChanged: () => setDialogState(() {}),
-        ),
-        const SizedBox(height: 20),
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -1108,54 +989,6 @@ class _InfoTile extends StatelessWidget {
   }
 }
 
-class _CostInputField extends StatelessWidget {
-  const _CostInputField({
-    required this.controller,
-    required this.label,
-    required this.icon,
-    required this.color,
-    required this.onChanged,
-  });
-  final TextEditingController controller;
-  final String label;
-  final IconData icon;
-  final Color color;
-  final VoidCallback onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return TextField(
-      controller: controller,
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      onChanged: (_) => onChanged(),
-      style: TextStyle(color: cs.onSurface),
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, size: 18, color: color),
-        prefixText: '$_currencySymbol ',
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: cs.outline),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: cs.outline),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: color, width: 1.5),
-        ),
-        filled: true,
-        fillColor: cs.surfaceContainerLow,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 12,
-        ),
-      ),
-    );
-  }
-}
 
 class _BreakdownRow extends StatelessWidget {
   const _BreakdownRow({
