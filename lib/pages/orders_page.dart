@@ -1386,7 +1386,7 @@ class _OrdersPageState extends State<OrdersPage> {
 
     if (confirmed != true || !mounted) return;
     try {
-      await _dbService.updateOrder(order.copyWith(status: newStatus));
+      await _dbService.updateOrderStatus(order.id, newStatus);
       if (!mounted) return;
       setDialogState(() => onStatusChanged(newStatus));
       messenger.showSnackBar(

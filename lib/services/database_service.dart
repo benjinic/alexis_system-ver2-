@@ -377,6 +377,15 @@ class DatabaseService implements DatabaseServiceInterface {
     }
   }
 
+  // 只改訂單狀態，唔掂 order_items。
+  // 唔好用 updateOrder：佢會刪晒再重寫 order_items，傳入無 items 嘅訂單會清空所有細項。
+  Future<void> updateOrderStatus(String orderId, String status) async {
+    await _ordersRef.doc(orderId).update({
+      'status': status,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   // 保留舊呼叫點；實際同步改由 order_items trigger 聚合到 orders/workshop_orders。
   Future<void> updateOrderFabricStatus({
     required String orderId,
