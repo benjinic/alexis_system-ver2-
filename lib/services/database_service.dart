@@ -451,21 +451,6 @@ class DatabaseService implements DatabaseServiceInterface {
     }
   }
 
-  // 只更新訂單成本拆解中的 Material / Outsourcing，並同步重算總成本與利潤。
-  Future<void> updateOrderCostBreakdown({
-    required String orderId,
-    required double materialCost,
-    required double outsourcingCost,
-  }) async {
-    if (materialCost < 0 || outsourcingCost < 0) {
-      throw Exception('Cost values cannot be negative.');
-    }
-
-    throw UnsupportedError(
-      'Order cost aggregates are now recalculated by Cloud Functions.',
-    );
-  }
-
   // 更新單一訂單細項的訂料狀態，並同步主訂單聚合狀態。
   Future<void> updateOrderItemFabricStatus({
     required String orderId,
